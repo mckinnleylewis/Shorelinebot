@@ -5,6 +5,13 @@ const {
     ChannelType, InteractionType 
 } = require('discord.js');
 const fs = require('fs');
+const express = require('express'); // <-- added
+
+// Keep-alive server for Render free tier
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is alive!'));
+app.listen(PORT, () => console.log(`Keep-alive server running on port ${PORT}`));
 
 const client = new Client({
     intents: [
