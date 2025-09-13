@@ -663,12 +663,10 @@ async function handleButton(interaction) {
     }
 }
 
-// ---------- handleTicketModal (create channel and include submitted info) ----------
+// ---------- handleTicketModal (create channel and include submitted info + claim system) ----------
 async function handleTicketModal(interaction) {
     try {
-        // interaction.customId = ticket_modal_ticket_general (example)
         const customId = interaction.customId; // e.g. ticket_modal_ticket_general
-        // derive ticket type key
         const typeKey = customId.replace('ticket_modal_', ''); // ticket_general
         const ticketTypes = {
             ticket_general: 'general-support',
@@ -696,7 +694,6 @@ async function handleTicketModal(interaction) {
             permissionOverwrites: [
                 { id: interaction.guild.id, deny: ['ViewChannel'] },
                 { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'AttachFiles', 'ReadMessageHistory'] },
-                // roleToPing may be an ID string; guard if undefined
                 ...(roleToPing ? [{ id: roleToPing, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] }] : [])
             ]
         }).catch(err => {
@@ -709,6 +706,7 @@ async function handleTicketModal(interaction) {
             return;
         }
 
+        // Ticket embed
         const embed = new EmbedBuilder()
             .setTitle('🎫 Ticket Created')
             .setDescription(`Ticket opened by ${interaction.user.tag}.\n${ roleToPing ? `<@&${roleToPing}> has been notified.` : '' }`)
@@ -719,8 +717,12 @@ async function handleTicketModal(interaction) {
             .setColor('Green')
             .setTimestamp();
 
+        // Buttons: Claim + Close
         const row = new ActionRowBuilder()
-            .addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger));
+            .addComponents(
+                new ButtonBuilder().setCustomId('claim_ticket').setLabel('✅ Claim Ticket').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger)
+            );
 
         await channel.send({ content: `${ roleToPing ? `<@&${roleToPing}> ` : '' }<@${interaction.user.id}>`, embeds: [embed], components: [row] }).catch(() => {});
 
@@ -739,10 +741,12 @@ async function handleTicketModal(interaction) {
             .setColor('Green')
             .setTimestamp()
         );
+
     } catch (err) {
         console.error('handleTicketModal error:', err);
         try { if (!interaction.replied) await interaction.reply({ content: 'An error occurred while creating the ticket.', ephemeral: true }); } catch(e) {}
     }
 }
+
 
 client.login(TOKEN);
