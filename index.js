@@ -663,90 +663,166 @@ async function handleButton(interaction) {
     }
 }
 
-// ---------- handleTicketModal (create channel and include submitted info + claim system) ----------
-async function handleTicketModal(interaction) {
-    try {
-        const customId = interaction.customId; // e.g. ticket_modal_ticket_general
-        const typeKey = customId.replace('ticket_modal_', ''); // ticket_general
-        const ticketTypes = {
-            ticket_general: 'general-support',
-            ticket_ban: 'ban-appeal',
-            ticket_report: 'report',
-            ticket_feedback: 'feedback',
-            ticket_other: 'other'
-        };
-        const ticketType = ticketTypes[typeKey] || 'ticket';
+// ---------- handleButton (Ticket buttons including Claim system) ----------
+async function handleButton(interaction) {
+    const { customId, user, channel } = interaction;
 
-        const reason = interaction.fields.getTextInputValue('ticket_reason');
-        const robloxUser = interaction.fields.getTextInputValue('ticket_roblox');
+    // --- Ticket Claim System ---
+    if (customId === 'claim_ticket') {
+        if (!channel.name.startsWith('ticket-')) return;
 
-        // Determine role to ping
-        let roleToPing = SUPPORT_ROLE;
-        if (typeKey === 'ticket_report') roleToPing = REPORT_ROLE;
+        // Fetch the ticket opener (everyone with ViewChannel + SendMessages except @everyone)
+        const currentPerms = channel.permissionOverwrites.cache;
+        const ticketOwner = currentPerms.find(po => po.allow.has('ViewChannel') && po.id !== channel.guild.id)?.id;
 
-        // Create sanitized channel name
-        const channelName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
-
-        const channel = await interaction.guild.channels.create({
-            name: channelName,
-            type: ChannelType.GuildText,
-            parent: TICKET_CATEGORY,
-            permissionOverwrites: [
-                { id: interaction.guild.id, deny: ['ViewChannel'] },
-                { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages', 'AttachFiles', 'ReadMessageHistory'] },
-                ...(roleToPing ? [{ id: roleToPing, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] }] : [])
-            ]
-        }).catch(err => {
-            console.error('channel create error:', err);
-            return null;
-        });
-
-        if (!channel) {
-            await interaction.reply({ content: 'Failed to create ticket channel.', ephemeral: true });
-            return;
+        // Remove SUPPORT_ROLE if present
+        if (SUPPORT_ROLE) {
+            await channel.permissionOverwrites.edit(SUPPORT_ROLE, { ViewChannel: false }).catch(() => {});
         }
 
-        // Ticket embed
+        // Add claimer
+        await channel.permissionOverwrites.edit(user.id, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true
+        }).catch(() => {});
+
+        // Ensure ticket owner remains
+        if (ticketOwner) {
+            await channel.permissionOverwrites.edit(ticketOwner, {
+                ViewChannel: true,
+                SendMessages: true,
+                ReadMessageHistory: true
+            }).catch(() => {});
+        }
+
+        // Disable claim button
+        const msg = await interaction.message.fetch();
+        const updatedRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('claim_ticket')
+                    .setLabel('✅ Claimed')
+                    .setStyle(ButtonStyle.Success)
+                    .setDisabled(true),
+                new ButtonBuilder()
+                    .setCustomId('close_ticket')
+                    .setLabel('🔒 Close Ticket')
+                    .setStyle(ButtonStyle.Danger)
+            );
+        await msg.edit({ components: [updatedRow] }).catch(() => {});
+
         const embed = new EmbedBuilder()
-            .setTitle('🎫 Ticket Created')
-            .setDescription(`Ticket opened by ${interaction.user.tag}.\n${ roleToPing ? `<@&${roleToPing}> has been notified.` : '' }`)
-            .addFields(
-                { name: 'Reason', value: reason || 'No reason provided' },
-                { name: 'Roblox Username', value: robloxUser || 'Not provided' }
-            )
+            .setTitle('✅ Ticket Claimed')
+            .setDescription(`${user.tag} has claimed this ticket.`)
             .setColor('Green')
             .setTimestamp();
+        await channel.send({ embeds: [embed] }).catch(() => {});
 
-        // Buttons: Claim + Close
+        // Log claim
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Claimed')
+            .setDescription(`Ticket: ${channel.name}\nClaimer: ${user.tag}`)
+            .setColor('Green')
+            .setTimestamp()
+        );
+
+        await interaction.deferUpdate();
+        return;
+    }
+
+    // --- Close ticket ---
+    if (customId === 'close_ticket') {
+        await channel.permissionOverwrites.edit(interaction.user.id, { SendMessages: false }).catch(() => {});
+        const embed = new EmbedBuilder()
+            .setTitle('🔒 Ticket Closed')
+            .setDescription(`Ticket closed by ${interaction.user.tag}.`)
+            .setColor('Orange')
+            .setTimestamp();
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder().setCustomId('reopen_ticket').setLabel('♻️ Reopen Ticket').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('delete_ticket').setLabel('🗑️ Delete Ticket').setStyle(ButtonStyle.Danger)
+            );
+        await channel.send({ embeds: [embed], components: [row] }).catch(() => {});
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Closed')
+            .setDescription(`Ticket: ${channel.name}\nClosed by: ${interaction.user.tag}`)
+            .setColor('Orange')
+            .setTimestamp()
+        );
+        return;
+    }
+
+    // --- Reopen ticket ---
+    if (customId === 'reopen_ticket') {
+        await channel.permissionOverwrites.edit(interaction.user.id, { SendMessages: true }).catch(() => {});
+        const embed = new EmbedBuilder()
+            .setTitle('♻️ Ticket Reopened')
+            .setDescription(`Ticket reopened by ${interaction.user.tag}.`)
+            .setColor('Green')
+            .setTimestamp();
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId('claim_ticket').setLabel('✅ Claim Ticket').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger)
             );
-
-        await channel.send({ content: `${ roleToPing ? `<@&${roleToPing}> ` : '' }<@${interaction.user.id}>`, embeds: [embed], components: [row] }).catch(() => {});
-
-        // Acknowledge the modal to the user
-        await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral: true });
-
-        // Optionally set channel topic with summary
-        try {
-            await channel.setTopic(`Ticket for ${interaction.user.tag} — Type: ${ticketType} — Roblox: ${robloxUser}`);
-        } catch (e) {}
-
-        // Log creation
+        await channel.send({ embeds: [embed], components: [row] }).catch(() => {});
         logTicket(new EmbedBuilder()
-            .setTitle('Ticket Created')
-            .setDescription(`Ticket: ${channel}\nOwner: ${interaction.user.tag}\nType: ${ticketType}\nRoblox: ${robloxUser}\nReason: ${reason}`)
+            .setTitle('Ticket Reopened')
+            .setDescription(`Ticket: ${channel.name}\nReopened by: ${interaction.user.tag}`)
             .setColor('Green')
             .setTimestamp()
         );
+        return;
+    }
 
-    } catch (err) {
-        console.error('handleTicketModal error:', err);
-        try { if (!interaction.replied) await interaction.reply({ content: 'An error occurred while creating the ticket.', ephemeral: true }); } catch(e) {}
+    // --- Delete ticket ---
+    if (customId === 'delete_ticket') {
+        const embed = new EmbedBuilder()
+            .setTitle('🗑️ Ticket Deletion Initiated')
+            .setDescription('This ticket will be deleted in 15 seconds.')
+            .setColor('Red')
+            .setTimestamp();
+        await channel.send({ embeds: [embed] }).catch(() => {});
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Deleted')
+            .setDescription(`Ticket: ${channel.name}\nDeleted by: ${interaction.user.tag}`)
+            .setColor('Red')
+            .setTimestamp()
+        );
+        setTimeout(async () => {
+            await channel.delete().catch(() => {});
+        }, 15000);
+        return;
     }
 }
 
+// ---------- Auto-add mentioned users in claimed ticket ----------
+client.on('messageCreate', async msg => {
+    if (msg.author.bot) return;
+    if (!msg.channel.name?.startsWith('ticket-')) return;
+
+    const mentionedUsers = msg.mentions.users;
+    if (!mentionedUsers.size) return;
+
+    for (const [id, user] of mentionedUsers) {
+        const perms = msg.channel.permissionOverwrites.cache.get(id);
+        if (!perms || !perms.allow.has('ViewChannel')) {
+            await msg.channel.permissionOverwrites.edit(id, {
+                ViewChannel: true,
+                SendMessages: true,
+                ReadMessageHistory: true
+            }).catch(() => {});
+            await msg.channel.send(`✅ Added ${user.tag} to this ticket (mentioned by ${msg.author.tag})`).catch(() => {});
+            logTicket(new EmbedBuilder()
+                .setTitle('Ticket User Added via Mention')
+                .setDescription(`${user.tag} was added to ticket ${msg.channel.name} by mention from ${msg.author.tag}`)
+                .setColor('Green')
+                .setTimestamp()
+            );
+        }
+    }
+});
 
 client.login(TOKEN);
