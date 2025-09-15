@@ -24,7 +24,7 @@ const client = new Client({
 });
 
 const {
-    TOKEN, GUILD_ID, LOG_CHANNEL_ID, SUPPORT_ROLE, REPORT_ROLE, TICKET_CATEGORY, TICKET_LOG, VERIFY_LOG_CHANNEL, VERIFIED_ROLE_ID, WELCOME_CHANNEL
+    TOKEN, GUILD_ID, LOG_CHANNEL_ID, SUPPORT_ROLE, REPORT_ROLE, TICKET_CATEGORY, TICKET_LOG, VERIFY_LOG_CHANNEL, VERIFIED_ROLE_ID, WELCOME_CHANNEL, UNVERIFIED_ROLE_ID
 } = process.env;
 
 // --- AFK Map ---
@@ -735,171 +735,206 @@ async function handleButton(interaction) {
             .setStyle(TextInputStyle.Short)
             .setRequired(true);
 
-        const firstRow = new ActionRowBuilder().addComponents(codeInput);
-        modal.addComponents(firstRow);
-
-        await interaction.showModal(modal);
-
-    } else if (customId && customId.startsWith('ticket_')) {
-        const ticketType = customId.split('_')[1];
-        const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${ticketType}`)
-            .setTitle(`Open a ${ticketType} Ticket`);
-
-        const subjectInput = new TextInputBuilder()
-            .setCustomId('ticketSubjectInput')
-            .setLabel("Subject")
+        const usernameInput = new TextInputBuilder()
+            .setCustomId('usernameInput')
+            .setLabel("Discord Username")
             .setStyle(TextInputStyle.Short)
             .setRequired(true);
 
-        const descriptionInput = new TextInputBuilder()
-            .setCustomId('ticketDescriptionInput')
-            .setLabel("Description")
+        const firstActionRow = new ActionRowBuilder().addComponents(codeInput);
+        const secondActionRow = new ActionRowBuilder().addComponents(usernameInput);
+
+        modal.addComponents(firstActionRow, secondActionRow);
+        await interaction.showModal(modal);
+    } else if (customId.startsWith('ticket_')) {
+        const modal = new ModalBuilder()
+            .setCustomId(`ticket_modal_${customId.split('_')[1]}`)
+            .setTitle('Open a new ticket');
+
+        const reasonInput = new TextInputBuilder()
+            .setCustomId('reasonInput')
+            .setLabel("Reason for your ticket")
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(true);
 
-        const firstRow = new ActionRowBuilder().addComponents(subjectInput);
-        const secondRow = new ActionRowBuilder().addComponents(descriptionInput);
-
-        modal.addComponents(firstRow, secondRow);
+        const firstActionRow = new ActionRowBuilder().addComponents(reasonInput);
+        modal.addComponents(firstActionRow);
         await interaction.showModal(modal);
-
     } else if (customId === 'close_ticket') {
-        const channel = interaction.channel;
-        if (!channel.name.startsWith('ticket-')) {
-            return await interaction.reply({
+        if (!interaction.channel.name.startsWith('ticket-')) {
+            return interaction.reply({
                 content: 'This is not a ticket channel.',
                 ephemeral: true
             });
         }
-
-        const closeButton = new ButtonBuilder().setCustomId('confirm_close').setLabel('Confirm Close').setStyle(ButtonStyle.Danger);
-        const cancelButton = new ButtonBuilder().setCustomId('cancel_close').setLabel('Cancel').setStyle(ButtonStyle.Secondary);
-        const row = new ActionRowBuilder().addComponents(closeButton, cancelButton);
-
-        await interaction.reply({
-            content: 'Are you sure you want to close this ticket?',
-            components: [row]
-        });
-
-    } else if (customId === 'confirm_close') {
-        await interaction.reply({
-            content: 'Closing ticket in 5 seconds...',
-            ephemeral: true
-        });
-        setTimeout(async () => {
-            await interaction.channel.delete().catch(console.error);
-            const logEmbed = new EmbedBuilder().setTitle('Ticket Closed').setDescription(`Ticket: ${interaction.channel.name}\nClosed by: ${interaction.user.tag}`).setColor('Red').setTimestamp();
-            logTicket(logEmbed);
-        }, 5000);
-
-    } else if (customId === 'cancel_close') {
-        await interaction.reply({
-            content: 'Ticket closure cancelled.',
-            ephemeral: true
-        });
+        await interaction.reply('Ticket will be closed in 10 seconds.');
+        logTicket(new EmbedBuilder().setTitle('Ticket Closed').setDescription(`Ticket: ${interaction.channel.name}\nClosed by: ${interaction.user.tag}`).setColor('Red').setTimestamp());
+        setTimeout(() => interaction.channel.delete(), 10000);
     }
 }
 
-// ---------- handleTicketModal ----------
-async function handleTicketModal(interaction) {
-    const {
-        customId,
-        user,
-        guild
-    } = interaction;
-    const ticketType = customId.split('_')[2];
-    const ticketSubject = interaction.fields.getTextInputValue('ticketSubjectInput');
-    const ticketDescription = interaction.fields.getTextInputValue('ticketDescriptionInput');
-
-    const ticketChannel = await guild.channels.create({
-        name: `ticket-${user.username}-${ticketType}`,
-        type: ChannelType.GuildText,
-        parent: TICKET_CATEGORY,
-        permissionOverwrites: [
-            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-            { id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-            { id: REPORT_ROLE, deny: [PermissionFlagsBits.ViewChannel], allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-        ]
-    });
-
-    const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger);
-    const row = new ActionRowBuilder().addComponents(closeButton);
-
-    const ticketEmbed = new EmbedBuilder()
-        .setTitle(`🎫 ${ticketType.charAt(0).toUpperCase() + ticketType.slice(1)} Ticket`)
-        .setDescription(`New ticket from ${user}.\n**Subject:** ${ticketSubject}\n**Description:**\n${ticketDescription}`)
-        .setColor('Green')
-        .setTimestamp();
-
-    await ticketChannel.send({
-        content: `<@&${SUPPORT_ROLE}> New ticket created by ${user}!`,
-        embeds: [ticketEmbed],
-        components: [row]
-    });
-
-    await interaction.reply({
-        content: `Your ticket has been created in ${ticketChannel}. We'll be with you shortly!`,
-        ephemeral: true
-    });
-
-    logTicket(new EmbedBuilder().setTitle('New Ticket Created').setDescription(`**User:** ${user.tag}\n**Channel:** <#${ticketChannel.id}>`).setColor('Green').setTimestamp());
-}
-
-// ---------- handleVerifyModal ----------
+// ---------- handleVerifyModal (handles verification process) ----------
 async function handleVerifyModal(interaction) {
-    const {
-        user,
-        guild
-    } = interaction;
-    const enteredCode = interaction.fields.getTextInputValue('verificationCodeInput').toUpperCase();
+    const verificationCode = interaction.fields.getTextInputValue('verificationCodeInput').trim();
+    const providedUsername = interaction.fields.getTextInputValue('usernameInput').trim();
 
-    // Check if the entered code is in the list of valid codes
-    if (VERIFICATION_CODES.includes(enteredCode)) {
-        const verifiedRole = guild.roles.cache.get(VERIFIED_ROLE_ID);
+    if (VERIFICATION_CODES.includes(verificationCode)) {
+        const member = interaction.guild.members.cache.get(interaction.user.id);
+        const verifiedRole = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
+        const unverifiedRole = interaction.guild.roles.cache.get(UNVERIFIED_ROLE_ID);
+
         if (!verifiedRole) {
+            console.error(`Verified role with ID ${VERIFIED_ROLE_ID} not found.`);
             return interaction.reply({
-                content: 'Verification failed: The "Verified" role could not be found. Please contact an admin.',
+                content: 'Server error: The verified role was not found. Please contact an admin.',
                 ephemeral: true
             });
         }
-        if (interaction.member.roles.cache.has(VERIFIED_ROLE_ID)) {
+
+        if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
             return interaction.reply({
                 content: 'You are already verified!',
                 ephemeral: true
             });
         }
-        try {
-            await interaction.member.roles.add(verifiedRole);
-            await interaction.reply({
-                content: '✅ Verification successful! You now have access to the server.',
-                ephemeral: true
-            });
-            const logChannel = guild.channels.cache.get(VERIFY_LOG_CHANNEL);
-            if (logChannel) {
-                const logEmbed = new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setTitle('Member Verified')
-                    .setDescription(`**User:** ${user.tag} (${user.id})\n**Time:** <t:${Math.floor(Date.now() / 1000)}:F>`)
-                    .setThumbnail(user.displayAvatarURL());
-                logChannel.send({
-                    embeds: [logEmbed]
-                });
-            }
-        } catch (error) {
-            console.error('Failed to add verified role:', error);
-            await interaction.reply({
-                content: 'An error occurred while assigning the role. Please try again or contact an admin.',
-                ephemeral: true
+
+        // Add the verified role
+        await member.roles.add(verifiedRole).catch(console.error);
+
+        // Remove the unverified role
+        if (unverifiedRole) {
+            await member.roles.remove(unverifiedRole).catch(console.error);
+        } else {
+            console.warn(`Unverified role with ID ${UNVERIFIED_ROLE_ID} not found.`);
+        }
+
+        const successEmbed = new EmbedBuilder()
+            .setTitle('✅ Verification Successful!')
+            .setDescription('You have been successfully verified and granted access to the server.')
+            .addFields({
+                name: 'Username',
+                value: providedUsername,
+                inline: true
+            }, {
+                name: 'Discord User',
+                value: `<@${interaction.user.id}>`,
+                inline: true
+            })
+            .setColor('Green')
+            .setTimestamp();
+
+        await interaction.reply({
+            embeds: [successEmbed],
+            ephemeral: true
+        });
+
+        const logChannel = await interaction.guild.channels.fetch(VERIFY_LOG_CHANNEL);
+        if (logChannel) {
+            logChannel.send({
+                embeds: [successEmbed]
             });
         }
     } else {
+        const failureEmbed = new EmbedBuilder()
+            .setTitle('❌ Verification Failed')
+            .setDescription('The verification code you entered is incorrect. Please try again or visit the website for the current code.')
+            .setColor('Red')
+            .setTimestamp();
         await interaction.reply({
-            content: '❌ Incorrect code. Please try again with one of the valid codes from the welcome message.',
+            embeds: [failureEmbed],
             ephemeral: true
         });
     }
 }
 
-client.login(TOKEN);
+// ---------- handleTicketModal (handles ticket creation) ----------
+async function handleTicketModal(interaction) {
+    const reason = interaction.fields.getTextInputValue('reasonInput');
+    const type = interaction.customId.split('_')[2];
+    const ticketOwner = interaction.user;
+
+    // Check for existing tickets
+    const existingChannel = interaction.guild.channels.cache.find(c => c.name === `ticket-${ticketOwner.discriminator !== '0' ? ticketOwner.username : ticketOwner.id}`);
+    if (existingChannel) {
+        return interaction.reply({
+            content: `You already have an open ticket: ${existingChannel}`,
+            ephemeral: true
+        });
+    }
+
+    const channelName = `ticket-${ticketOwner.discriminator !== '0' ? ticketOwner.username : ticketOwner.id}`;
+    const category = interaction.guild.channels.cache.get(TICKET_CATEGORY);
+
+    let permissions = [
+        {
+            id: interaction.guild.id,
+            deny: [PermissionFlagsBits.ViewChannel],
+        },
+        {
+            id: ticketOwner.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+        }
+    ];
+
+    if (SUPPORT_ROLE) permissions.push({ id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    if (REPORT_ROLE && type === 'report') permissions.push({ id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+
+    const ticketChannel = await interaction.guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: category,
+        permissionOverwrites: permissions,
+    });
+
+    const ticketEmbed = new EmbedBuilder()
+        .setTitle(`🎫 ${type.charAt(0).toUpperCase() + type.slice(1)} Ticket`)
+        .setDescription(`**New ticket created by ${ticketOwner.tag}**\n\n**Reason:**\n\`\`\`${reason}\`\`\``)
+        .addFields({
+            name: 'User',
+            value: `${ticketOwner.tag} (${ticketOwner.id})`,
+            inline: true
+        })
+        .setColor('#0099ff')
+        .setTimestamp();
+
+    const closeButton = new ButtonBuilder()
+        .setCustomId('close_ticket')
+        .setLabel('Close Ticket')
+        .setStyle(ButtonStyle.Danger);
+
+    const row = new ActionRowBuilder().addComponents(closeButton);
+
+    await ticketChannel.send({
+        content: `Hey <@${ticketOwner.id}>! A staff member will be with you shortly.`,
+        embeds: [ticketEmbed],
+        components: [row]
+    });
+
+    await interaction.reply({
+        content: `Your ticket has been created: ${ticketChannel}`,
+        ephemeral: true
+    });
+
+    const logEmbed = new EmbedBuilder()
+        .setTitle('Ticket Created')
+        .setDescription(`New ticket created by ${ticketOwner.tag}`)
+        .addFields({
+            name: 'Channel',
+            value: `<#${ticketChannel.id}>`,
+            inline: true
+        }, {
+            name: 'Type',
+            value: type,
+            inline: true
+        }, {
+            name: 'Reason',
+            value: reason,
+            inline: false
+        })
+        .setColor('Blue')
+        .setTimestamp();
+    logTicket(logEmbed);
+}
+
+// Login to Discord
+client.login(TOKEN).catch(console.error);
