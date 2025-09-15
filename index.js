@@ -1,3 +1,4 @@
+// index.js (updated)
 require('dotenv').config();
 const {
     Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder,
@@ -5,7 +6,7 @@ const {
     ChannelType, InteractionType, ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const fs = require('fs');
-const express = require('express');
+const express = require('express'); // <-- keep-alive
 
 // Keep-alive server for Render free tier
 const app = express();
@@ -23,21 +24,10 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
-const {
-    TOKEN, GUILD_ID, LOG_CHANNEL_ID, SUPPORT_ROLE, REPORT_ROLE, TICKET_CATEGORY, TICKET_LOG, VERIFY_LOG_CHANNEL, VERIFIED_ROLE_ID, WELCOME_CHANNEL, UNVERIFIED_ROLE_ID
-} = process.env;
+const { TOKEN, GUILD_ID, LOG_CHANNEL_ID, SUPPORT_ROLE, REPORT_ROLE, TICKET_CATEGORY, TICKET_LOG } = process.env;
 
 // --- AFK Map ---
 const afkMap = new Map(); // userId -> { reason: string, since: number }
-
-// --- Verification Codes ---
-const VERIFICATION_CODES = [
-    '4K7H9J2L',
-    'N8M5Q2RX',
-    'Z6T1B9WP',
-    'H3F8D7VC',
-    'R2G6L5SX'
-];
 
 // Persistent custom permissions
 let customPermUsers = [];
@@ -71,166 +61,128 @@ const logTicket = async (embed) => {
 // Slash commands registration
 const commands = [
     new SlashCommandBuilder().setName('kick').setDescription('Kick a member')
-        .addUserOption(o => o.setName('target').setDescription('User to kick').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    .addUserOption(o => o.setName('target').setDescription('User to kick').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
 
     new SlashCommandBuilder().setName('ban').setDescription('Ban a member')
-        .addUserOption(o => o.setName('target').setDescription('User to ban').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    .addUserOption(o => o.setName('target').setDescription('User to ban').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
 
     new SlashCommandBuilder().setName('warn').setDescription('Warn a member')
-        .addUserOption(o => o.setName('target').setDescription('User to warn').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    .addUserOption(o => o.setName('target').setDescription('User to warn').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
 
+    // New: warnings list & removewarn
     new SlashCommandBuilder().setName('warnings').setDescription('List warnings for a user')
-        .addUserOption(o => o.setName('target').setDescription('User to view warnings').setRequired(true)),
+    .addUserOption(o => o.setName('target').setDescription('User to view warnings').setRequired(true)),
 
     new SlashCommandBuilder().setName('removewarn').setDescription('Remove a warning by its id')
-        .addUserOption(o => o.setName('target').setDescription('User to remove warning from').setRequired(true))
-        .addStringOption(o => o.setName('warnid').setDescription('Warning ID to remove').setRequired(true)),
+    .addUserOption(o => o.setName('target').setDescription('User to remove warning from').setRequired(true))
+    .addStringOption(o => o.setName('warnid').setDescription('Warning ID to remove').setRequired(true)),
 
     new SlashCommandBuilder().setName('say').setDescription('Make the bot say something')
-        .addStringOption(o => o.setName('message').setDescription('Message to say').setRequired(true)),
+    .addStringOption(o => o.setName('message').setDescription('Message to say').setRequired(true)),
 
     new SlashCommandBuilder().setName('announce').setDescription('Send an announcement embed')
-        .addStringOption(o => o.setName('message').setDescription('Announcement message').setRequired(true)),
+    .addStringOption(o => o.setName('message').setDescription('Announcement message').setRequired(true)),
 
     new SlashCommandBuilder().setName('ping').setDescription('Ping the bot'),
 
     new SlashCommandBuilder().setName('permissions').setDescription('Grant a user permission to use admin commands')
-        .addUserOption(o => o.setName('target').setDescription('User to give permission').setRequired(true)),
+    .addUserOption(o => o.setName('target').setDescription('User to give permission').setRequired(true)),
 
     new SlashCommandBuilder().setName('removeperms').setDescription('Remove a user from having admin commands permission')
-        .addUserOption(o => o.setName('target').setDescription('User to remove permission').setRequired(true)),
+    .addUserOption(o => o.setName('target').setDescription('User to remove permission').setRequired(true)),
 
+    // Ticket panel
     new SlashCommandBuilder().setName('ticketpanel').setDescription('Send the ticket panel embed'),
 
+    // Ticket user management
     new SlashCommandBuilder().setName('add').setDescription('Add a user to this ticket (gives view/send perms)')
-        .addUserOption(o => o.setName('user').setDescription('User to add to ticket').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('User to add to ticket').setRequired(true)),
 
     new SlashCommandBuilder().setName('remove').setDescription('Remove a user from this ticket (removes view/send perms)')
-        .addUserOption(o => o.setName('user').setDescription('User to remove from ticket').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('User to remove from ticket').setRequired(true)),
 
+    // Role commands (single)
     new SlashCommandBuilder().setName('addrole').setDescription('Add a role to a user')
-        .addUserOption(o => o.setName('user').setDescription('User to add role to').setRequired(true))
-        .addRoleOption(o => o.setName('role').setDescription('Role to add').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('User to add role to').setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Role to add').setRequired(true)),
 
     new SlashCommandBuilder().setName('removerole').setDescription('Remove a role from a user')
-        .addUserOption(o => o.setName('user').setDescription('User to remove role from').setRequired(true))
-        .addRoleOption(o => o.setName('role').setDescription('Role to remove').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('User to remove role from').setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Role to remove').setRequired(true)),
 
+    // Role commands (multiple via comma-separated list)
     new SlashCommandBuilder().setName('addmulti').setDescription('Add multiple roles to a user (comma-separated role mentions/ids/names)')
-        .addUserOption(o => o.setName('user').setDescription('Target user').setRequired(true))
-        .addStringOption(o => o.setName('roles').setDescription('Comma-separated roles').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('Target user').setRequired(true))
+    .addStringOption(o => o.setName('roles').setDescription('Comma-separated roles').setRequired(true)),
 
     new SlashCommandBuilder().setName('removemulti').setDescription('Remove multiple roles from a user (comma-separated role mentions/ids/names)')
-        .addUserOption(o => o.setName('user').setDescription('Target user').setRequired(true))
-        .addStringOption(o => o.setName('roles').setDescription('Comma-separated roles').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('Target user').setRequired(true))
+    .addStringOption(o => o.setName('roles').setDescription('Comma-separated roles').setRequired(true)),
 
+    // AFK command (anyone)
     new SlashCommandBuilder().setName('afk').setDescription('Set your AFK status')
-        .addStringOption(o => o.setName('reason').setDescription('Reason for AFK').setRequired(false))
+    .addStringOption(o => o.setName('reason').setDescription('Reason for AFK').setRequired(false))
 ].map(cmd => cmd.toJSON());
 
-const rest = new REST({
-    version: '10'
-}).setToken(TOKEN);
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-client.once('ready', async () => {
+client.once('ready', async() => {
     console.log(`${client.user.tag} is online!`);
     client.user.setPresence({
         status: process.env.BOT_STATUS || 'online',
-        activities: [{
-            name: process.env.BOT_ACTIVITY || 'Shoreline Interactive',
-            type: ActivityType.Watching
-        }]
+        activities: [{ name: process.env.BOT_ACTIVITY || 'Shoreline Interactive', type: ActivityType.Watching }]
     });
 
     try {
-        await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), {
-            body: commands
-        });
+        await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands });
         console.log('Slash commands registered.');
     } catch (err) {
         console.error('Failed to register slash commands:', err);
     }
 });
 
-// New member join event for verification
-client.on('guildMemberAdd', async member => {
-    if (member.user.bot) return;
-    if (member.guild.id !== GUILD_ID) return;
-
-    const welcomeChannel = member.guild.channels.cache.get(WELCOME_CHANNEL);
-    if (!welcomeChannel) {
-        console.error(`Welcome channel with ID ${WELCOME_CHANNEL} not found.`);
-        return;
-    }
-
-    const welcomeEmbed = new EmbedBuilder()
-        .setColor('#0099ff')
-        .setTitle('Welcome to the Server!')
-        .setDescription('To gain access to the server, you need to verify your account by entering one of the codes below.')
-        .addFields({
-            name: 'Verification Codes',
-            value: `1️⃣ \`4K7H9J2L\`\n2️⃣ \`N8M5Q2RX\`\n3️⃣ \`Z6T1B9WP\`\n4️⃣ \`H3F8D7VC\`\n5️⃣ \`R2G6L5SX\``,
-            inline: false
-        })
-        .setTimestamp()
-        .setFooter({
-            text: `Welcome to ${member.guild.name}`
-        });
-
-    welcomeChannel.send({
-        content: `Hey ${member}! Please go to <#${VERIFY_CHANNEL}> to get verified.`,
-        embeds: [welcomeEmbed]
-    }).catch(console.error);
-});
-
 // Interaction create (handles slash commands, buttons, modals)
 client.on('interactionCreate', async interaction => {
     try {
+        // Modal submit (ticket form)
         if (interaction.type === InteractionType.ModalSubmit) {
-            if (interaction.customId === 'verify_modal') {
-                await handleVerifyModal(interaction);
-                return;
-            } else if (interaction.customId && interaction.customId.startsWith('ticket_modal_')) {
+            // expecting customId like ticket_modal_ticket_general or ticket_modal_ticket_ban etc.
+            if (interaction.customId && interaction.customId.startsWith('ticket_modal_')) {
                 await handleTicketModal(interaction);
                 return;
             }
+        }
+
+        if (interaction.type === InteractionType.ApplicationCommand) {
+            // AFK command handled inline before other admin checks
+            if (interaction.commandName === 'afk') {
+                const reason = interaction.options.getString('reason') || 'AFK';
+                afkMap.set(interaction.user.id, { reason, since: Date.now() });
+
+                const embed = new EmbedBuilder()
+                    .setTitle('😴 AFK Set')
+                    .setDescription(`<@${interaction.user.id}> I have set your AFK: **${reason}**`)
+                    .setColor('Yellow')
+                    .setTimestamp();
+                await interaction.reply({ embeds: [embed] });
+                return;
+            }
+
+            await handleCommand(interaction);
+            return;
         }
 
         if (interaction.isButton()) {
             await handleButton(interaction);
             return;
         }
-
-        if (interaction.isCommand()) {
-            if (interaction.commandName === 'afk') {
-                const reason = interaction.options.getString('reason') || 'AFK';
-                afkMap.set(interaction.user.id, {
-                    reason,
-                    since: Date.now()
-                });
-
-                const embed = new EmbedBuilder()
-                    .setTitle('😴 AFK Set')
-                    .setDescription(`I have set your AFK: **${reason}**`)
-                    .setColor('Yellow')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                return;
-            }
-            await handleCommand(interaction);
-        }
     } catch (err) {
         console.error('interactionCreate error:', err);
         try {
-            if (!interaction.replied && !interaction.deferred) await interaction.reply({
-                content: 'An error occurred.',
-                ephemeral: true
-            });
+            if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'An error occurred.', ephemeral: true });
         } catch (e) {}
     }
 });
@@ -253,7 +205,7 @@ client.on('messageCreate', async msg => {
             if (afkMap.has(user.id)) {
                 const afk = afkMap.get(user.id);
                 try {
-                    msg.reply(`⚠️ <@${user.id}> is currently AFK: **${afk.reason}** (since <t:${Math.floor(afk.since/1000)}:R>)`).catch(() => {});
+                    msg.reply(`⚠️ <@${user.id}> is currently AFK: **${afk.reason}** (since <t:${Math.floor(afk.since/1000)}:R>)).catch(() => {});`);
                 } catch (e) {}
             }
         });
@@ -264,677 +216,549 @@ client.on('messageCreate', async msg => {
 async function handleCommand(interaction) {
     const userId = interaction.user.id;
     const member = await interaction.guild.members.fetch(userId);
-    const target = interaction.options.getUser('target') || interaction.options.getUser('user');
+    const target = interaction.options.getUser('target') || interaction.options.getUser('user') || interaction.options.getUser('target');
     const reason = interaction.options.getString('reason') || 'No reason provided';
     const message = interaction.options.getString('message');
 
     // Which commands require admin?
-    const adminCommands = ['kick', 'ban', 'warn', 'warnings', 'removewarn', 'addrole', 'removerole', 'addmulti', 'removemulti', 'add', 'remove', 'permissions', 'removeperms', 'ticketpanel', 'say', 'announce'];
+    const adminCommands = ['kick', 'ban', 'warn', 'removewarn', 'addrole', 'removerole', 'addmulti', 'removemulti', 'add', 'remove', 'permissions', 'removeperms'];
     if (adminCommands.includes(interaction.commandName)) {
         const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
         const isOwner = interaction.guild.ownerId === userId;
         const hasCustomPerm = customPermUsers.includes(userId);
         if (!isAdmin && !isOwner && !hasCustomPerm) {
-            return interaction.reply({
-                content: 'You do not have permission to use this command.',
-                ephemeral: true
-            });
+            return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
         }
     }
 
     try {
         switch (interaction.commandName) {
-            case 'ping': {
-                const embed = new EmbedBuilder()
-                    .setTitle('🏓 Pong!')
-                    .setDescription(`Latency: ${client.ws.ping}ms`)
-                    .setColor('Yellow')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
-
-            case 'permissions': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                if (!customPermUsers.includes(target.id)) customPermUsers.push(target.id);
-                savePerms();
-                const embed = new EmbedBuilder()
-                    .setTitle('Permission Granted')
-                    .setDescription(`${target.tag} can now use admin commands`)
-                    .setColor('Green')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
-
-            case 'removeperms': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                customPermUsers = customPermUsers.filter(id => id !== target.id);
-                savePerms();
-                const embed = new EmbedBuilder()
-                    .setTitle('Permission Removed')
-                    .setDescription(`${target.tag} can no longer use admin commands`)
-                    .setColor('Red')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
-
-            case 'kick': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                const memberTarget = await interaction.guild.members.fetch(target.id);
-                await memberTarget.kick(reason);
-                const embed = new EmbedBuilder()
-                    .setTitle('Member Kicked')
-                    .setDescription(`${target.tag} was kicked by ${interaction.user.tag}`)
-                    .addFields({
-                        name: 'Reason',
-                        value: reason
-                    })
-                    .setColor('Red')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                await target.send({
-                    embeds: [embed]
-                }).catch(() => {});
-                logCommand(embed);
-                break;
-            }
-
-            case 'ban': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                const memberTarget = await interaction.guild.members.fetch(target.id);
-                await memberTarget.ban({
-                    reason
-                });
-                const embed = new EmbedBuilder()
-                    .setTitle('Member Banned')
-                    .setDescription(`${target.tag} was banned by ${interaction.user.tag}`)
-                    .addFields({
-                        name: 'Reason',
-                        value: reason
-                    })
-                    .setColor('DarkRed')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                await target.send({
-                    embeds: [embed]
-                }).catch(() => {});
-                logCommand(embed);
-                break;
-            }
-
-            case 'warn': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                const warnId = Date.now().toString();
-                const userIdStr = target.id;
-                if (!warningsDB[userIdStr]) warningsDB[userIdStr] = [];
-                const warnObj = {
-                    id: warnId,
-                    moderator: interaction.user.tag,
-                    moderatorId: interaction.user.id,
-                    reason,
-                    timestamp: new Date().toISOString()
-                };
-                warningsDB[userIdStr].push(warnObj);
-                saveWarnings();
-
-                const embed = new EmbedBuilder()
-                    .setTitle('Member Warned')
-                    .setDescription(`${target.tag} was warned by ${interaction.user.tag}`)
-                    .addFields(
-                        {
-                            name: 'Reason',
-                            value: reason
-                        }, {
-                            name: 'Warning ID',
-                            value: warnId
-                        }
-                    )
-                    .setColor('Orange')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                await target.send({
-                    embeds: [embed]
-                }).catch(() => {});
-                logCommand(embed);
-                break;
-            }
-
-            case 'warnings': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                const userWarnings = warningsDB[target.id] || [];
-                if (userWarnings.length === 0) {
-                    return interaction.reply({
-                        content: `${target.tag} has no warnings.`,
-                        ephemeral: true
-                    });
+            case 'ping':
+                {
+                    const embed = new EmbedBuilder()
+                        .setTitle('🏓 Pong!')
+                        .setDescription(`Latency: ${client.ws.ping}ms`)
+                        .setColor('Yellow')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
                 }
-                const embed = new EmbedBuilder()
-                    .setTitle(`Warnings for ${target.tag}`)
-                    .setColor('Orange')
-                    .setTimestamp();
-                userWarnings.slice(0, 25).forEach(w => {
-                    embed.addFields({
-                        name: `ID: ${w.id} — by ${w.moderator}`,
-                        value: `${w.reason}\n${new Date(w.timestamp).toLocaleString()}`
-                    });
-                });
-                await interaction.reply({
-                    embeds: [embed],
-                    ephemeral: true
-                });
-                break;
-            }
 
-            case 'removewarn': {
-                if (!target) return interaction.reply({
-                    content: 'No target provided.',
-                    ephemeral: true
-                });
-                const warnId = interaction.options.getString('warnid');
-                const userWarnings = warningsDB[target.id] || [];
-                const idx = userWarnings.findIndex(w => w.id === warnId);
-                if (idx === -1) {
-                    return interaction.reply({
-                        content: `No warning with ID ${warnId} for ${target.tag}`,
-                        ephemeral: true
-                    });
+            case 'permissions':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    if (!customPermUsers.includes(target.id)) customPermUsers.push(target.id);
+                    savePerms();
+                    const embed = new EmbedBuilder()
+                        .setTitle('Permission Granted')
+                        .setDescription(`${target.tag} can now use admin commands`)
+                        .setColor('Green')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
                 }
-                const removed = userWarnings.splice(idx, 1)[0];
-                warningsDB[target.id] = userWarnings;
-                saveWarnings();
 
-                const embed = new EmbedBuilder()
-                    .setTitle('Warning Removed')
-                    .setDescription(`Removed warning ${removed.id} for ${target.tag}`)
-                    .addFields({
-                        name: 'Original reason',
-                        value: removed.reason
-                    })
-                    .setColor('Green')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+            case 'removeperms':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    customPermUsers = customPermUsers.filter(id => id !== target.id);
+                    savePerms();
+                    const embed = new EmbedBuilder()
+                        .setTitle('Permission Removed')
+                        .setDescription(`${target.tag} can no longer use admin commands`)
+                        .setColor('Red')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
 
-            case 'say': {
-                if (!message) return interaction.reply({
-                    content: 'No message provided.',
-                    ephemeral: true
-                });
-                await interaction.channel.send({
-                    content: message
-                });
-                await interaction.reply({
-                    content: 'Message sent!',
-                    ephemeral: true
-                });
-                logCommand(new EmbedBuilder().setTitle('Say Command Used').setDescription(`${interaction.user.tag} said: ${message}`).setColor('Blue').setTimestamp());
-                break;
-            }
+            case 'kick':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    const memberTarget = await interaction.guild.members.fetch(target.id);
+                    await memberTarget.kick(reason);
+                    const embed = new EmbedBuilder()
+                        .setTitle('Member Kicked')
+                        .setDescription(`${target.tag} was kicked by ${interaction.user.tag}`)
+                        .addFields({ name: 'Reason', value: reason })
+                        .setColor('Red')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    await target.send({ embeds: [embed] }).catch(() => {});
+                    logCommand(embed);
+                    break;
+                }
 
-            case 'announce': {
-                if (!message) return interaction.reply({
-                    content: 'No message provided.',
-                    ephemeral: true
-                });
-                const embed = new EmbedBuilder()
-                    .setTitle('📢 Announcement')
-                    .setDescription(message)
-                    .setColor('Blue')
-                    .setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+            case 'ban':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    const memberTarget = await interaction.guild.members.fetch(target.id);
+                    await memberTarget.ban({ reason });
+                    const embed = new EmbedBuilder()
+                        .setTitle('Member Banned')
+                        .setDescription(`${target.tag} was banned by ${interaction.user.tag}`)
+                        .addFields({ name: 'Reason', value: reason })
+                        .setColor('DarkRed')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    await target.send({ embeds: [embed] }).catch(() => {});
+                    logCommand(embed);
+                    break;
+                }
 
-            case 'ticketpanel': {
-                const embed = new EmbedBuilder()
-                    .setTitle('🎫 Shoreline Tickets')
-                    .setDescription('Click a button below to open a ticket.\n**Available Ticket Types:**\n- General Support\n- Ban Appeal\n- Report\n- Feedback\n- Other')
-                    .setColor('Green')
-                    .setTimestamp();
+            case 'warn':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    // store warning in warningsDB
+                    const warnId = Date.now().toString(); // unique-ish ID
+                    const userIdStr = target.id;
+                    if (!warningsDB[userIdStr]) warningsDB[userIdStr] = [];
+                    const warnObj = {
+                        id: warnId,
+                        moderator: interaction.user.tag,
+                        moderatorId: interaction.user.id,
+                        reason,
+                        timestamp: new Date().toISOString()
+                    };
+                    warningsDB[userIdStr].push(warnObj);
+                    saveWarnings();
 
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder().setCustomId('ticket_general').setLabel('💬 General Support').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('ticket_ban').setLabel('⚖️ Ban Appeal').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('ticket_report').setLabel('🚨 Report').setStyle(ButtonStyle.Danger),
-                        new ButtonBuilder().setCustomId('ticket_feedback').setLabel('📝 Feedback').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('ticket_other').setLabel('❓ Other').setStyle(ButtonStyle.Secondary)
-                    );
+                    const embed = new EmbedBuilder()
+                        .setTitle('Member Warned')
+                        .setDescription(`${target.tag} was warned by ${interaction.user.tag}`)
+                        .addFields(
+                            { name: 'Reason', value: reason }, { name: 'Warning ID', value: warnId }
+                        )
+                        .setColor('Orange')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    await target.send({ embeds: [embed] }).catch(() => {});
+                    logCommand(embed);
+                    break;
+                }
 
-                await interaction.channel.send({
-                    embeds: [embed],
-                    components: [row]
-                });
-                await interaction.reply({
-                    content: 'Ticket panel sent!',
-                    ephemeral: true
-                });
-                break;
-            }
+            case 'warnings':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    const userWarnings = warningsDB[target.id] || [];
+                    if (userWarnings.length === 0) {
+                        return interaction.reply({ content: `${target.tag} has no warnings.`, ephemeral: true });
+                    }
+                    // Build an embed list (limit to 25 fields)
+                    const embed = new EmbedBuilder()
+                        .setTitle(`Warnings for ${target.tag}`)
+                        .setColor('Orange')
+                        .setTimestamp();
+                    userWarnings.slice(0, 25).forEach(w => {
+                        embed.addFields({ name: `ID: ${w.id} — by ${w.moderator}`, value: `${w.reason}\n${new Date(w.timestamp).toLocaleString()}` });
+                    });
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                    break;
+                }
+
+            case 'removewarn':
+                {
+                    if (!target) return interaction.reply({ content: 'No target provided.', ephemeral: true });
+                    const warnId = interaction.options.getString('warnid');
+                    const userWarnings = warningsDB[target.id] || [];
+                    const idx = userWarnings.findIndex(w => w.id === warnId);
+                    if (idx === -1) {
+                        return interaction.reply({ content: `No warning with ID ${warnId} for ${target.tag}`, ephemeral: true });
+                    }
+                    const removed = userWarnings.splice(idx, 1)[0];
+                    warningsDB[target.id] = userWarnings;
+                    saveWarnings();
+
+                    const embed = new EmbedBuilder()
+                        .setTitle('Warning Removed')
+                        .setDescription(`Removed warning ${removed.id} for ${target.tag}`)
+                        .addFields({ name: 'Original reason', value: removed.reason })
+                        .setColor('Green')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
+
+            case 'say':
+                {
+                    if (!message) return interaction.reply({ content: 'No message provided.', ephemeral: true });
+                    await interaction.channel.send({ content: message });
+                    await interaction.reply({ content: 'Message sent!', ephemeral: true });
+                    logCommand(new EmbedBuilder().setTitle('Say Command Used').setDescription(`${interaction.user.tag} said: ${message}`).setColor('Blue').setTimestamp());
+                    break;
+                }
+
+            case 'announce':
+                {
+                    if (!message) return interaction.reply({ content: 'No message provided.', ephemeral: true });
+                    const embed = new EmbedBuilder()
+                        .setTitle('📢 Announcement')
+                        .setDescription(message)
+                        .setColor('Blue')
+                        .setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
+
+            case 'ticketpanel':
+                {
+                    const embed = new EmbedBuilder()
+                        .setTitle('🎫 Shoreline Tickets')
+                        .setDescription('Click a button below to open a ticket.\n**Available Ticket Types:**\n- General Support\n- Ban Appeal\n- Report\n- Feedback\n- Other')
+                        .setColor('Green')
+                        .setTimestamp();
+
+                    const row = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder().setCustomId('ticket_general').setLabel('💬 General Support').setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId('ticket_ban').setLabel('⚖️ Ban Appeal').setStyle(ButtonStyle.Primary),
+                            new ButtonBuilder().setCustomId('ticket_report').setLabel('🚨 Report').setStyle(ButtonStyle.Danger),
+                            new ButtonBuilder().setCustomId('ticket_feedback').setLabel('📝 Feedback').setStyle(ButtonStyle.Secondary),
+                            new ButtonBuilder().setCustomId('ticket_other').setLabel('❓ Other').setStyle(ButtonStyle.Secondary)
+                        );
+
+                    await interaction.channel.send({ embeds: [embed], components: [row] });
+                    await interaction.reply({ content: 'Ticket panel sent!', ephemeral: true });
+                    break;
+                }
 
             // --- Ticket channel user add/remove ---
-            case 'add': {
-                if (!interaction.channel || !interaction.channel.name || !interaction.channel.name.startsWith('ticket-')) {
-                    return interaction.reply({
-                        content: 'This command must be used inside a ticket channel.',
-                        ephemeral: true
-                    });
+            case 'add':
+                {
+                    if (!interaction.channel || !interaction.channel.name || !interaction.channel.name.startsWith('ticket-')) {
+                        return interaction.reply({ content: 'This command must be used inside a ticket channel.', ephemeral: true });
+                    }
+                    const userToAdd = interaction.options.getUser('user');
+                    await interaction.channel.permissionOverwrites.edit(userToAdd.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+                    const embed = new EmbedBuilder().setTitle('User Added to Ticket').setDescription(`${userToAdd.tag} was added to this ticket by ${interaction.user.tag}`).setColor('Green').setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logTicket(new EmbedBuilder().setTitle('Ticket - User Added').setDescription(`Ticket: ${interaction.channel.name}\nAdded: ${userToAdd.tag}\nBy: ${interaction.user.tag}`).setColor('Green').setTimestamp());
+                    break;
                 }
-                const userToAdd = interaction.options.getUser('user');
-                await interaction.channel.permissionOverwrites.edit(userToAdd.id, {
-                    ViewChannel: true,
-                    SendMessages: true,
-                    ReadMessageHistory: true
-                });
-                const embed = new EmbedBuilder().setTitle('User Added to Ticket').setDescription(`${userToAdd.tag} was added to this ticket by ${interaction.user.tag}`).setColor('Green').setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logTicket(new EmbedBuilder().setTitle('Ticket - User Added').setDescription(`Ticket: ${interaction.channel.name}\nAdded: ${userToAdd.tag}\nBy: ${interaction.user.tag}`).setColor('Green').setTimestamp());
-                break;
-            }
 
-            case 'remove': {
-                if (!interaction.channel || !interaction.channel.name || !interaction.channel.name.startsWith('ticket-')) {
-                    return interaction.reply({
-                        content: 'This command must be used inside a ticket channel.',
-                        ephemeral: true
-                    });
+            case 'remove':
+                {
+                    if (!interaction.channel || !interaction.channel.name || !interaction.channel.name.startsWith('ticket-')) {
+                        return interaction.reply({ content: 'This command must be used inside a ticket channel.', ephemeral: true });
+                    }
+                    const userToRemove = interaction.options.getUser('user');
+                    await interaction.channel.permissionOverwrites.edit(userToRemove.id, { ViewChannel: false, SendMessages: false, ReadMessageHistory: false }).catch(() => {});
+                    const embed = new EmbedBuilder().setTitle('User Removed from Ticket').setDescription(`${userToRemove.tag} was removed from this ticket by ${interaction.user.tag}`).setColor('Orange').setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logTicket(new EmbedBuilder().setTitle('Ticket - User Removed').setDescription(`Ticket: ${interaction.channel.name}\nRemoved: ${userToRemove.tag}\nBy: ${interaction.user.tag}`).setColor('Orange').setTimestamp());
+                    break;
                 }
-                const userToRemove = interaction.options.getUser('user');
-                await interaction.channel.permissionOverwrites.edit(userToRemove.id, {
-                    ViewChannel: false,
-                    SendMessages: false,
-                    ReadMessageHistory: false
-                }).catch(() => {});
-                const embed = new EmbedBuilder().setTitle('User Removed from Ticket').setDescription(`${userToRemove.tag} was removed from this ticket by ${interaction.user.tag}`).setColor('Orange').setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logTicket(new EmbedBuilder().setTitle('Ticket - User Removed').setDescription(`Ticket: ${interaction.channel.name}\nRemoved: ${userToRemove.tag}\nBy: ${interaction.user.tag}`).setColor('Orange').setTimestamp());
-                break;
-            }
 
             // --- Role single add/remove ---
-            case 'addrole': {
-                const userToMod = interaction.options.getUser('user');
-                const role = interaction.options.getRole('role');
-                const guildMember = await interaction.guild.members.fetch(userToMod.id);
-                await guildMember.roles.add(role.id).catch(err => {
-                    throw err;
-                });
-                const embed = new EmbedBuilder().setTitle('Role Added').setDescription(`Added ${role.name} to ${userToMod.tag}`).setColor('Green').setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+            case 'addrole':
+                {
+                    const userToMod = interaction.options.getUser('user');
+                    const role = interaction.options.getRole('role');
+                    const guildMember = await interaction.guild.members.fetch(userToMod.id);
+                    await guildMember.roles.add(role.id).catch(err => {
+                        throw err;
+                    });
+                    const embed = new EmbedBuilder().setTitle('Role Added').setDescription(`Added ${role.name} to ${userToMod.tag}`).setColor('Green').setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
 
-            case 'removerole': {
-                const userToMod = interaction.options.getUser('user');
-                const role = interaction.options.getRole('role');
-                const guildMember = await interaction.guild.members.fetch(userToMod.id);
-                await guildMember.roles.remove(role.id).catch(err => {
-                    throw err;
-                });
-                const embed = new EmbedBuilder().setTitle('Role Removed').setDescription(`Removed ${role.name} from ${userToMod.tag}`).setColor('Orange').setTimestamp();
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+            case 'removerole':
+                {
+                    const userToMod = interaction.options.getUser('user');
+                    const role = interaction.options.getRole('role');
+                    const guildMember = await interaction.guild.members.fetch(userToMod.id);
+                    await guildMember.roles.remove(role.id).catch(err => {
+                        throw err;
+                    });
+                    const embed = new EmbedBuilder().setTitle('Role Removed').setDescription(`Removed ${role.name} from ${userToMod.tag}`).setColor('Orange').setTimestamp();
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
 
             // --- Role multiple add/remove (comma separated string) ---
-            case 'addmulti': {
-                const userToMod = interaction.options.getUser('user');
-                const rolesString = interaction.options.getString('roles');
-                const guildMember = await interaction.guild.members.fetch(userToMod.id);
+            case 'addmulti':
+                {
+                    const userToMod = interaction.options.getUser('user');
+                    const rolesString = interaction.options.getString('roles');
+                    const guildMember = await interaction.guild.members.fetch(userToMod.id);
 
-                const roleTokens = rolesString.split(',').map(s => s.trim()).filter(Boolean);
-                const addedRoles = [];
-                const failed = [];
-                for (const token of roleTokens) {
-                    const mentionMatch = token.match(/^<@&(\d+)>$/);
-                    let role = null;
-                    if (mentionMatch) role = interaction.guild.roles.cache.get(mentionMatch[1]);
-                    else if (/^\d+$/.test(token)) role = interaction.guild.roles.cache.get(token);
-                    else role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === token.toLowerCase());
-                    if (role) {
-                        try {
-                            await guildMember.roles.add(role.id);
-                            addedRoles.push(role.name);
-                        } catch (e) {
+                    const roleTokens = rolesString.split(',').map(s => s.trim()).filter(Boolean);
+                    const addedRoles = [];
+                    const failed = [];
+                    for (const token of roleTokens) {
+                        // try mention <@&ID>
+                        const mentionMatch = token.match(/^<@&(\d+)>$/);
+                        let role = null;
+                        if (mentionMatch) role = interaction.guild.roles.cache.get(mentionMatch[1]);
+                        else if (/^\d+$/.test(token)) role = interaction.guild.roles.cache.get(token);
+                        else role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === token.toLowerCase());
+                        if (role) {
+                            try {
+                                await guildMember.roles.add(role.id);
+                                addedRoles.push(role.name);
+                            } catch (e) {
+                                failed.push(token);
+                            }
+                        } else {
                             failed.push(token);
                         }
-                    } else {
-                        failed.push(token);
                     }
+
+                    const embed = new EmbedBuilder().setTitle('Add Multiple Roles').setColor('Green').setTimestamp()
+                        .setDescription(`Added: ${addedRoles.length ? addedRoles.join(', ') : 'None'}\nFailed: ${failed.length ? failed.join(', ') : 'None'}`);
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
                 }
 
-                const embed = new EmbedBuilder().setTitle('Add Multiple Roles').setColor('Green').setTimestamp()
-                    .setDescription(`Added: ${addedRoles.length ? addedRoles.join(', ') : 'None'}\nFailed: ${failed.length ? failed.join(', ') : 'None'}`);
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+            case 'removemulti':
+                {
+                    const userToMod = interaction.options.getUser('user');
+                    const rolesString = interaction.options.getString('roles');
+                    const guildMember = await interaction.guild.members.fetch(userToMod.id);
 
-            case 'removemulti': {
-                const userToMod = interaction.options.getUser('user');
-                const rolesString = interaction.options.getString('roles');
-                const guildMember = await interaction.guild.members.fetch(userToMod.id);
-
-                const roleTokens = rolesString.split(',').map(s => s.trim()).filter(Boolean);
-                const removedRoles = [];
-                const failed = [];
-                for (const token of roleTokens) {
-                    const mentionMatch = token.match(/^<@&(\d+)>$/);
-                    let role = null;
-                    if (mentionMatch) role = interaction.guild.roles.cache.get(mentionMatch[1]);
-                    else if (/^\d+$/.test(token)) role = interaction.guild.roles.cache.get(token);
-                    else role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === token.toLowerCase());
-                    if (role) {
-                        try {
-                            await guildMember.roles.remove(role.id);
-                            removedRoles.push(role.name);
-                        } catch (e) {
+                    const roleTokens = rolesString.split(',').map(s => s.trim()).filter(Boolean);
+                    const removedRoles = [];
+                    const failed = [];
+                    for (const token of roleTokens) {
+                        const mentionMatch = token.match(/^<@&(\d+)>$/);
+                        let role = null;
+                        if (mentionMatch) role = interaction.guild.roles.cache.get(mentionMatch[1]);
+                        else if (/^\d+$/.test(token)) role = interaction.guild.roles.cache.get(token);
+                        else role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === token.toLowerCase());
+                        if (role) {
+                            try {
+                                await guildMember.roles.remove(role.id);
+                                removedRoles.push(role.name);
+                            } catch (e) {
+                                failed.push(token);
+                            }
+                        } else {
                             failed.push(token);
                         }
-                    } else {
-                        failed.push(token);
                     }
-                }
 
-                const embed = new EmbedBuilder().setTitle('Remove Multiple Roles').setColor('Orange').setTimestamp()
-                    .setDescription(`Removed: ${removedRoles.length ? removedRoles.join(', ') : 'None'}\nFailed: ${failed.length ? failed.join(', ') : 'None'}`);
-                await interaction.reply({
-                    embeds: [embed]
-                });
-                logCommand(embed);
-                break;
-            }
+                    const embed = new EmbedBuilder().setTitle('Remove Multiple Roles').setColor('Orange').setTimestamp()
+                        .setDescription(`Removed: ${removedRoles.length ? removedRoles.join(', ') : 'None'}\nFailed: ${failed.length ? failed.join(', ') : 'None'}`);
+                    await interaction.reply({ embeds: [embed] });
+                    logCommand(embed);
+                    break;
+                }
 
             default:
-                await interaction.reply({
-                    content: 'Unknown command',
-                    ephemeral: true
-                });
+                await interaction.reply({ content: 'Unknown command', ephemeral: true });
                 break;
         }
     } catch (err) {
         console.error('handleCommand error:', err);
         try {
-            await interaction.reply({
-                content: `Error: ${err.message || err}`,
-                ephemeral: true
-            });
+            await interaction.reply({ content: `Error: ${err.message || err}`, ephemeral: true });
         } catch (e) {}
     }
 }
 
-// ---------- handleButton (shows modal for ticket creation & verification) ----------
+// ---------- handleButton (shows modal for ticket creation) ----------
 async function handleButton(interaction) {
-    const {
-        customId,
-        user
-    } = interaction;
+    const { customId, user } = interaction;
 
-    if (customId === 'verify_button') {
+    const ticketTypes = {
+        ticket_general: 'general-support',
+        ticket_ban: 'ban-appeal',
+        ticket_report: 'report',
+        ticket_feedback: 'feedback',
+        ticket_other: 'other'
+    };
+
+    // When a ticket button is pressed, show a modal asking Reason + Roblox Username
+    if (customId && customId.startsWith('ticket_')) {
+        // Build modal
         const modal = new ModalBuilder()
-            .setCustomId('verify_modal')
-            .setTitle('Enter Verification Code');
-
-        const codeInput = new TextInputBuilder()
-            .setCustomId('verificationCodeInput')
-            .setLabel("Verification Code")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const usernameInput = new TextInputBuilder()
-            .setCustomId('usernameInput')
-            .setLabel("Discord Username")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-
-        const firstActionRow = new ActionRowBuilder().addComponents(codeInput);
-        const secondActionRow = new ActionRowBuilder().addComponents(usernameInput);
-
-        modal.addComponents(firstActionRow, secondActionRow);
-        await interaction.showModal(modal);
-    } else if (customId.startsWith('ticket_')) {
-        const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${customId.split('_')[1]}`)
-            .setTitle('Open a new ticket');
+            .setCustomId(`ticket_modal_${customId}`) // e.g. ticket_modal_ticket_general
+            .setTitle('Open a Ticket');
 
         const reasonInput = new TextInputBuilder()
-            .setCustomId('reasonInput')
-            .setLabel("Reason for your ticket")
+            .setCustomId('ticket_reason')
+            .setLabel('Reason')
             .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Explain why you are opening this ticket...')
             .setRequired(true);
 
-        const firstActionRow = new ActionRowBuilder().addComponents(reasonInput);
-        modal.addComponents(firstActionRow);
-        await interaction.showModal(modal);
-    } else if (customId === 'close_ticket') {
-        if (!interaction.channel.name.startsWith('ticket-')) {
-            return interaction.reply({
-                content: 'This is not a ticket channel.',
-                ephemeral: true
-            });
-        }
-        await interaction.reply('Ticket will be closed in 10 seconds.');
-        logTicket(new EmbedBuilder().setTitle('Ticket Closed').setDescription(`Ticket: ${interaction.channel.name}\nClosed by: ${interaction.user.tag}`).setColor('Red').setTimestamp());
-        setTimeout(() => interaction.channel.delete(), 10000);
+        const robloxInput = new TextInputBuilder()
+            .setCustomId('ticket_roblox')
+            .setLabel('Roblox Username')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('Your Roblox username')
+            .setRequired(true);
+
+        // TextInput must be in ActionRow-like wrappers when added to modal
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(reasonInput),
+            new ActionRowBuilder().addComponents(robloxInput)
+        );
+
+        await interaction.showModal(modal).catch(err => {
+            console.error('showModal error:', err);
+            try {
+                interaction.reply({ content: 'Unable to show modal.', ephemeral: true });
+            } catch (e) {}
+        });
+        return;
     }
-}
 
-// ---------- handleVerifyModal (handles verification process) ----------
-async function handleVerifyModal(interaction) {
-    const verificationCode = interaction.fields.getTextInputValue('verificationCodeInput').trim();
-    const providedUsername = interaction.fields.getTextInputValue('usernameInput').trim();
+    // Close ticket
+    if (customId === 'close_ticket') {
+        await interaction.channel.permissionOverwrites.edit(interaction.user.id, { SendMessages: false }).catch(() => {});
 
-    if (VERIFICATION_CODES.includes(verificationCode)) {
-        const member = interaction.guild.members.cache.get(interaction.user.id);
-        const verifiedRole = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
-        const unverifiedRole = interaction.guild.roles.cache.get(UNVERIFIED_ROLE_ID);
+        const embed = new EmbedBuilder()
+            .setTitle('🔒 Ticket Closed')
+            .setDescription(`Ticket closed by ${interaction.user.tag}.`)
+            .setColor('Orange')
+            .setTimestamp();
 
-        if (!verifiedRole) {
-            console.error(`Verified role with ID ${VERIFIED_ROLE_ID} not found.`);
-            return interaction.reply({
-                content: 'Server error: The verified role was not found. Please contact an admin.',
-                ephemeral: true
-            });
-        }
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder().setCustomId('reopen_ticket').setLabel('♻️ Reopen Ticket').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('delete_ticket').setLabel('🗑️ Delete Ticket').setStyle(ButtonStyle.Danger)
+            );
 
-        if (member.roles.cache.has(VERIFIED_ROLE_ID)) {
-            return interaction.reply({
-                content: 'You are already verified!',
-                ephemeral: true
-            });
-        }
+        await interaction.channel.send({ embeds: [embed], components: [row] }).catch(() => {});
 
-        // Add the verified role
-        await member.roles.add(verifiedRole).catch(console.error);
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Closed')
+            .setDescription(`Ticket: ${interaction.channel.name}\nClosed by: ${interaction.user.tag}`)
+            .setColor('Orange')
+            .setTimestamp()
+        );
+        return;
+    }
 
-        // Remove the unverified role
-        if (unverifiedRole) {
-            await member.roles.remove(unverifiedRole).catch(console.error);
-        } else {
-            console.warn(`Unverified role with ID ${UNVERIFIED_ROLE_ID} not found.`);
-        }
+    // Reopen ticket
+    if (customId === 'reopen_ticket') {
+        await interaction.channel.permissionOverwrites.edit(interaction.user.id, { SendMessages: true }).catch(() => {});
 
-        const successEmbed = new EmbedBuilder()
-            .setTitle('✅ Verification Successful!')
-            .setDescription('You have been successfully verified and granted access to the server.')
-            .addFields({
-                name: 'Username',
-                value: providedUsername,
-                inline: true
-            }, {
-                name: 'Discord User',
-                value: `<@${interaction.user.id}>`,
-                inline: true
-            })
+        const embed = new EmbedBuilder()
+            .setTitle('♻️ Ticket Reopened')
+            .setDescription(`Ticket reopened by ${interaction.user.tag}.`)
             .setColor('Green')
             .setTimestamp();
 
-        await interaction.reply({
-            embeds: [successEmbed],
-            ephemeral: true
-        });
+        const row = new ActionRowBuilder()
+            .addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger));
 
-        const logChannel = await interaction.guild.channels.fetch(VERIFY_LOG_CHANNEL);
-        if (logChannel) {
-            logChannel.send({
-                embeds: [successEmbed]
-            });
-        }
-    } else {
-        const failureEmbed = new EmbedBuilder()
-            .setTitle('❌ Verification Failed')
-            .setDescription('The verification code you entered is incorrect. Please try again or visit the website for the current code.')
+        await interaction.channel.send({ embeds: [embed], components: [row] }).catch(() => {});
+
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Reopened')
+            .setDescription(`Ticket: ${interaction.channel.name}\nReopened by: ${interaction.user.tag}`)
+            .setColor('Green')
+            .setTimestamp()
+        );
+        return;
+    }
+
+    // Delete ticket
+    if (customId === 'delete_ticket') {
+        const embed = new EmbedBuilder()
+            .setTitle('🗑️ Ticket Deletion Initiated')
+            .setDescription('This ticket will be deleted in 15 seconds.')
             .setColor('Red')
             .setTimestamp();
-        await interaction.reply({
-            embeds: [failureEmbed],
-            ephemeral: true
-        });
+
+        await interaction.channel.send({ embeds: [embed], components: [] }).catch(() => {});
+
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Deletion')
+            .setDescription(`Ticket: ${interaction.channel.name}\nInitiated by: ${interaction.user.tag}`)
+            .setColor('Red')
+            .setTimestamp()
+        );
+
+        setTimeout(() => {
+            interaction.channel.delete().catch(err => {
+                console.error('Failed to delete ticket channel:', err);
+            });
+        }, 15000);
     }
 }
 
-// ---------- handleTicketModal (handles ticket creation) ----------
+
+// ---------- handleTicketModal (creates ticket channel) ----------
 async function handleTicketModal(interaction) {
-    const reason = interaction.fields.getTextInputValue('reasonInput');
-    const type = interaction.customId.split('_')[2];
-    const ticketOwner = interaction.user;
+    const ticketType = interaction.customId.replace('ticket_modal_ticket_', ''); // e.g., 'general', 'ban'
+    const reason = interaction.fields.getTextInputValue('ticket_reason');
+    const robloxUsername = interaction.fields.getTextInputValue('ticket_roblox');
+    const guild = interaction.guild;
+    const user = interaction.user;
 
-    // Check for existing tickets
-    const existingChannel = interaction.guild.channels.cache.find(c => c.name === `ticket-${ticketOwner.discriminator !== '0' ? ticketOwner.username : ticketOwner.id}`);
-    if (existingChannel) {
-        return interaction.reply({
-            content: `You already have an open ticket: ${existingChannel}`,
-            ephemeral: true
-        });
-    }
+    await interaction.deferReply({ ephemeral: true });
 
-    const channelName = `ticket-${ticketOwner.discriminator !== '0' ? ticketOwner.username : ticketOwner.id}`;
-    const category = interaction.guild.channels.cache.get(TICKET_CATEGORY);
-
-    let permissions = [
-        {
-            id: interaction.guild.id,
-            deny: [PermissionFlagsBits.ViewChannel],
-        },
-        {
-            id: ticketOwner.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+    try {
+        const ticketCategory = guild.channels.cache.get(TICKET_CATEGORY);
+        if (!ticketCategory || ticketCategory.type !== ChannelType.GuildCategory) {
+            return interaction.editReply({ content: 'Ticket category not found or is not a category.', ephemeral: true });
         }
-    ];
 
-    if (SUPPORT_ROLE) permissions.push({ id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-    if (REPORT_ROLE && type === 'report') permissions.push({ id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+        const channelName = `ticket-${user.username.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase()}-${Date.now().toString().slice(-4)}`;
+        const channel = await guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: ticketCategory.id,
+            permissionOverwrites: [{
+                id: guild.id,
+                deny: [PermissionFlagsBits.ViewChannel],
+            }, {
+                id: user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+            }, {
+                id: SUPPORT_ROLE,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+            }, ],
+        });
 
-    const ticketChannel = await interaction.guild.channels.create({
-        name: channelName,
-        type: ChannelType.GuildText,
-        parent: category,
-        permissionOverwrites: permissions,
-    });
+        // If ticket type is 'report', also add the report role
+        if (ticketType === 'report' && REPORT_ROLE) {
+            await channel.permissionOverwrites.edit(REPORT_ROLE, {
+                ViewChannel: true,
+                SendMessages: true,
+                ReadMessageHistory: true
+            });
+        }
 
-    const ticketEmbed = new EmbedBuilder()
-        .setTitle(`🎫 ${type.charAt(0).toUpperCase() + type.slice(1)} Ticket`)
-        .setDescription(`**New ticket created by ${ticketOwner.tag}**\n\n**Reason:**\n\`\`\`${reason}\`\`\``)
-        .addFields({
-            name: 'User',
-            value: `${ticketOwner.tag} (${ticketOwner.id})`,
-            inline: true
-        })
-        .setColor('#0099ff')
-        .setTimestamp();
+        const ticketEmbed = new EmbedBuilder()
+            .setTitle(`🎫 New Ticket: ${ticketType.charAt(0).toUpperCase() + ticketType.slice(1)}`)
+            .setDescription(`Thank you for opening a ticket. A support member will be with you shortly.`)
+            .addFields(
+                { name: 'User', value: user.tag }, { name: 'Roblox Username', value: robloxUsername }, { name: 'Reason', value: reason }
+            )
+            .setColor('Blue')
+            .setTimestamp();
 
-    const closeButton = new ButtonBuilder()
-        .setCustomId('close_ticket')
-        .setLabel('Close Ticket')
-        .setStyle(ButtonStyle.Danger);
+        const closeButton = new ActionRowBuilder()
+            .addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger));
 
-    const row = new ActionRowBuilder().addComponents(closeButton);
+        await channel.send({ content: `<@${user.id}> <@&${SUPPORT_ROLE}> ${ticketType === 'report' && REPORT_ROLE ? `<@&${REPORT_ROLE}>` : ''}`, embeds: [ticketEmbed], components: [closeButton] });
 
-    await ticketChannel.send({
-        content: `Hey <@${ticketOwner.id}>! A staff member will be with you shortly.`,
-        embeds: [ticketEmbed],
-        components: [row]
-    });
+        await interaction.editReply({ content: `✅ Your ticket has been created: ${channel}`, ephemeral: true });
 
-    await interaction.reply({
-        content: `Your ticket has been created: ${ticketChannel}`,
-        ephemeral: true
-    });
+        logTicket(new EmbedBuilder()
+            .setTitle('Ticket Created')
+            .setDescription(`Ticket: ${channel.name}\nType: ${ticketType}\nUser: ${user.tag}\nRoblox: ${robloxUsername}\nReason: ${reason}`)
+            .setColor('Blue')
+            .setTimestamp()
+        );
 
-    const logEmbed = new EmbedBuilder()
-        .setTitle('Ticket Created')
-        .setDescription(`New ticket created by ${ticketOwner.tag}`)
-        .addFields({
-            name: 'Channel',
-            value: `<#${ticketChannel.id}>`,
-            inline: true
-        }, {
-            name: 'Type',
-            value: type,
-            inline: true
-        }, {
-            name: 'Reason',
-            value: reason,
-            inline: false
-        })
-        .setColor('Blue')
-        .setTimestamp();
-    logTicket(logEmbed);
+    } catch (err) {
+        console.error('Failed to create ticket channel:', err);
+        await interaction.editReply({ content: `An error occurred while creating your ticket: ${err.message}`, ephemeral: true });
+    }
 }
 
-// Login to Discord
-client.login(TOKEN).catch(console.error);
+client.login(TOKEN);
