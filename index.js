@@ -670,27 +670,28 @@ async function handleButton(interaction) {
 
     // New: Claim Ticket
     if (customId === 'claim_ticket') {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferUpdate();
         const member = await interaction.guild.members.fetch(user.id);
-        if (!member.permissions.has(PermissionFlagsBits.Administrator) && !member.roles.cache.has(SUPPORT_ROLE) && !customPermUsers.includes(user.id)) {
-            return interaction.editReply({ content: 'You do not have permission to claim tickets.', ephemeral: true });
+        const hasClaimPerms = member.permissions.has(PermissionFlagsBits.Administrator) || member.roles.cache.has(SUPPORT_ROLE) || member.roles.cache.has(REPORT_ROLE) || customPermUsers.includes(user.id);
+
+        if (!hasClaimPerms) {
+            return interaction.followUp({ content: 'You do not have permission to claim tickets.', ephemeral: true });
         }
 
-        const closeEmbed = interaction.message.embeds[0];
-        const newEmbed = EmbedBuilder.from(closeEmbed)
-            .setDescription(`Ticket claimed by <@${user.id}>. Please describe your issue to them.`);
+        const originalEmbed = interaction.message.embeds[0];
+        const newEmbed = EmbedBuilder.from(originalEmbed)
+            .setTitle(`✅ Ticket Claimed`)
+            .setDescription(`This ticket has been claimed by <@${user.id}>.`)
+            .setColor('Green');
 
-        await interaction.message.edit({ embeds: [newEmbed], components: [] });
-        await interaction.channel.send({ content: `Ticket claimed by <@${user.id}>. The original user may be offline, please describe your issue here.` });
-        
-        // Remove the claim button and add the close buttons
         const closeRow = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('❌ Close Ticket').setStyle(ButtonStyle.Danger)
             );
-        await interaction.channel.send({ content: 'To close the ticket, click the button below.', components: [closeRow] });
-
-        await interaction.editReply({ content: '✅ Ticket claimed successfully!', ephemeral: true });
+        
+        await interaction.message.edit({ embeds: [newEmbed], components: [closeRow] });
+        await interaction.channel.send({ content: `<@${user.id}> will be handling your ticket today.` });
+        
         logTicket(new EmbedBuilder().setTitle('Ticket Claimed').setDescription(`Ticket: ${interaction.channel.name}\nClaimed By: ${user.tag}`).setColor('Blue').setTimestamp());
         return;
     }
@@ -761,10 +762,22 @@ async function handleButton(interaction) {
     // Delete Ticket
     if (customId === 'delete_ticket') {
         await interaction.deferReply({ ephemeral: true });
-        await interaction.editReply({ content: 'Deleting ticket in 5 seconds...', ephemeral: true });
+        const closeEmbed = new EmbedBuilder()
+            .setColor('Red')
+            .setTitle('Ticket Closed')
+            .setDescription('This ticket will be deleted in 15 seconds.');
+
+        const sentMessage = await interaction.channel.send({ embeds: [closeEmbed] });
+        
+        // Wait 15 seconds and then delete the channel
         setTimeout(async () => {
-            await interaction.channel.delete().catch(err => console.error('Error deleting ticket channel:', err));
-        }, 5000);
+            await interaction.channel.delete().catch(err => {
+                console.error('Error deleting ticket channel:', err);
+                sentMessage.delete().catch(() => {});
+            });
+        }, 15000);
+        
+        await interaction.editReply({ content: 'Deleting ticket in 15 seconds...', ephemeral: true });
         logTicket(new EmbedBuilder().setTitle('Ticket Deleted').setDescription(`Ticket: ${interaction.channel.name}\nDeleted By: ${user.tag}`).setColor('Red').setTimestamp());
         return;
     }
@@ -779,7 +792,7 @@ async function handleTicketModal(interaction) {
     const robloxName = interaction.fields.getTextInputValue('ticket_roblox');
 
     const hasTicket = interaction.guild.channels.cache.find(c =>
-        c.name === `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}` &&
+        c.name.startsWith(`ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`) &&
         c.parent && c.parent.id === TICKET_CATEGORY
     );
 
@@ -788,22 +801,36 @@ async function handleTicketModal(interaction) {
     }
 
     try {
+        const permissionOverwrites = [
+            // Deny @everyone from viewing all tickets
+            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            // Allow the ticket creator to view
+            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+        ];
+
+        const rolesToPing = [];
+
+        // Check the ticket type and set permissions accordingly
+        if (ticketSubject === 'report') {
+            // Report tickets are ONLY for the creator and the REPORT_ROLE
+            permissionOverwrites.push({ id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+            rolesToPing.push(REPORT_ROLE);
+        } else {
+            // All other tickets are for the creator, SUPPORT_ROLE, and REPORT_ROLE
+            permissionOverwrites.push(
+                { id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                { id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+            );
+            rolesToPing.push(SUPPORT_ROLE, REPORT_ROLE);
+        }
+        
         const ticketChannel = await interaction.guild.channels.create({
             name: `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
             type: ChannelType.GuildText,
             parent: TICKET_CATEGORY,
-            permissionOverwrites: [
-                { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-                { id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-            ]
+            permissionOverwrites: permissionOverwrites
         });
-
-        // Add special roles if applicable
-        if (ticketSubject === 'report' && REPORT_ROLE) {
-            await ticketChannel.permissionOverwrites.edit(REPORT_ROLE, { ViewChannel: true, SendMessages: true });
-        }
-
+        
         const welcomeEmbed = new EmbedBuilder()
             .setTitle(`New Ticket: ${ticketSubject.charAt(0).toUpperCase() + ticketSubject.slice(1)}`)
             .setDescription(`A staff member will be with you shortly. Please provide any additional information to help us resolve your issue.`)
@@ -815,13 +842,14 @@ async function handleTicketModal(interaction) {
             .setColor('Blue')
             .setTimestamp();
 
-        const closeRow = new ActionRowBuilder()
+        const claimRow = new ActionRowBuilder()
             .addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('❌ Close Ticket').setStyle(ButtonStyle.Danger),
                 new ButtonBuilder().setCustomId('claim_ticket').setLabel('🤝 Claim Ticket').setStyle(ButtonStyle.Primary)
             );
 
-        await ticketChannel.send({ embeds: [welcomeEmbed], components: [closeRow] });
+        const initialMessage = `<@${interaction.user.id}> ${rolesToPing.filter(Boolean).map(roleId => `<@&${roleId}>`).join(' ')}`;
+
+        await ticketChannel.send({ content: initialMessage, embeds: [welcomeEmbed], components: [claimRow] });
         await interaction.editReply({ content: `✅ Your ticket has been created: <#${ticketChannel.id}>`, ephemeral: true });
         
         logTicket(new EmbedBuilder().setTitle('Ticket Created').setDescription(`**Channel:** ${ticketChannel.name}\n**User:** ${interaction.user.tag}\n**Subject:** ${ticketSubject}\n**Reason:** ${reason}`).setColor('Blue').setTimestamp());
