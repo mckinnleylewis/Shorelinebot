@@ -144,6 +144,25 @@ client.once('ready', async() => {
     } catch (err) {
         console.error('Failed to register slash commands:', err);
     }
+    
+    // Timed message to keep bot online
+    const CHANNEL_ID_TO_PING = '1417158960410263673';
+    const PING_MESSAGE = 'Online ping! This message is to keep the bot from sleeping due to inactivity. 🤖';
+    const PING_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours in milliseconds
+
+    setInterval(async () => {
+        try {
+            const channel = await client.channels.fetch(CHANNEL_ID_TO_PING);
+            if (channel) {
+                await channel.send(PING_MESSAGE);
+                console.log(`Sent an online ping to channel ${CHANNEL_ID_TO_PING}.`);
+            } else {
+                console.error(`Channel with ID ${CHANNEL_ID_TO_PING} not found.`);
+            }
+        } catch (err) {
+            console.error('Failed to send timed ping message:', err);
+        }
+    }, PING_INTERVAL);
 });
 
 // New Event: Guild Member Add
@@ -465,6 +484,7 @@ async function handleCommand(interaction) {
 
                     await interaction.channel.send({ embeds: [embed], components: [row] });
                     await interaction.reply({ content: 'Ticket panel sent!', ephemeral: true });
+                    logCommand(new EmbedBuilder().setTitle('Ticket Panel Sent').setDescription(`Panel sent by ${interaction.user.tag}`).setColor('Green').setTimestamp());
                     break;
                 }
 
@@ -475,7 +495,7 @@ async function handleCommand(interaction) {
                         return interaction.reply({ content: 'This command must be used inside a ticket channel.', ephemeral: true });
                     }
                     if (!targetMention) {
-                         return interaction.reply({ content: 'You must mention a user or role to add.', ephemeral: true });
+                           return interaction.reply({ content: 'You must mention a user or role to add.', ephemeral: true });
                     }
                     
                     const type = targetMention.user ? 'user' : 'role';
@@ -495,7 +515,7 @@ async function handleCommand(interaction) {
                         return interaction.reply({ content: 'This command must be used inside a ticket channel.', ephemeral: true });
                     }
                     if (!targetMention) {
-                         return interaction.reply({ content: 'You must mention a user or role to remove.', ephemeral: true });
+                           return interaction.reply({ content: 'You must mention a user or role to remove.', ephemeral: true });
                     }
 
                     const type = targetMention.user ? 'user' : 'role';
@@ -607,256 +627,241 @@ async function handleCommand(interaction) {
                     logCommand(embed);
                     break;
                 }
-
+            
+            // ... (rest of your cases)
             default:
-                await interaction.reply({ content: 'Unknown command', ephemeral: true });
-                break;
+                await interaction.reply({ content: 'Unknown command.', ephemeral: true });
         }
     } catch (err) {
-        console.error('handleCommand error:', err);
-        try {
-            await interaction.reply({ content: `Error: ${err.message || err}`, ephemeral: true });
-        } catch (e) {}
+        console.error(`Error handling command ${interaction.commandName}:`, err);
+        const errorEmbed = new EmbedBuilder()
+            .setTitle('Command Failed')
+            .setDescription(`There was an error while executing this command: \`${err.message}\``)
+            .setColor('DarkRed')
+            .setTimestamp();
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ embeds: [errorEmbed], ephemeral: true }).catch(() => {});
+        } else {
+            await interaction.reply({ embeds: [errorEmbed], ephemeral: true }).catch(() => {});
+        }
     }
 }
 
-// ---------- handleButton (shows modal for ticket creation) ----------
+// --- handleButton (ticket buttons) ---
 async function handleButton(interaction) {
-    const { customId, user } = interaction;
+    if (interaction.customId === 'close_ticket') {
+        const ticketChannel = interaction.channel;
+        if (!ticketChannel.name.startsWith('ticket-')) {
+            return interaction.reply({ content: 'This is not a ticket channel.', ephemeral: true });
+        }
 
-    const ticketTypes = {
-        ticket_general: 'general-support',
-        ticket_ban: 'ban-appeal',
-        ticket_report: 'report',
-        ticket_feedback: 'feedback',
-        ticket_other: 'other'
-    };
+        const transcriptButton = new ButtonBuilder()
+            .setCustomId('save_transcript')
+            .setLabel('Save Transcript')
+            .setStyle(ButtonStyle.Secondary);
 
-    // When a ticket button is pressed, show a modal asking Reason + Roblox Username
-    if (customId && customId.startsWith('ticket_')) {
-        // Build modal
-        const modal = new ModalBuilder()
-            .setCustomId(`ticket_modal_${customId}`) // e.g. ticket_modal_ticket_general
-            .setTitle('Open a Ticket');
+        const confirmButton = new ButtonBuilder()
+            .setCustomId('confirm_close')
+            .setLabel('Confirm Close')
+            .setStyle(ButtonStyle.Danger);
 
-        const reasonInput = new TextInputBuilder()
-            .setCustomId('ticket_reason')
-            .setLabel('Reason')
-            .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder('Explain why you are opening this ticket...')
-            .setRequired(true);
+        const cancelButton = new ButtonBuilder()
+            .setCustomId('cancel_close')
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary);
 
-        const robloxInput = new TextInputBuilder()
-            .setCustomId('ticket_roblox')
-            .setLabel('Roblox Username')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Your Roblox username')
-            .setRequired(true);
+        const row = new ActionRowBuilder().addComponents(transcriptButton, confirmButton, cancelButton);
 
-        // TextInput must be in ActionRow-like wrappers when added to modal
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(reasonInput),
-            new ActionRowBuilder().addComponents(robloxInput)
-        );
-
-        await interaction.showModal(modal).catch(err => {
-            console.error('showModal error:', err);
-            try {
-                interaction.reply({ content: 'Unable to show modal.', ephemeral: true });
-            } catch (e) {}
+        await interaction.reply({
+            content: 'Are you sure you want to close this ticket?',
+            components: [row],
+            ephemeral: true
         });
         return;
     }
 
-    // New: Claim Ticket
-    if (customId === 'claim_ticket') {
-        await interaction.deferUpdate();
-        const member = await interaction.guild.members.fetch(user.id);
-        const hasClaimPerms = member.permissions.has(PermissionFlagsBits.Administrator) || member.roles.cache.has(SUPPORT_ROLE) || member.roles.cache.has(REPORT_ROLE) || customPermUsers.includes(user.id);
-
-        if (!hasClaimPerms) {
-            return interaction.followUp({ content: 'You do not have permission to claim tickets.', ephemeral: true });
-        }
-
-        const originalEmbed = interaction.message.embeds[0];
-        const newEmbed = EmbedBuilder.from(originalEmbed)
-            .setTitle(`✅ Ticket Claimed`)
-            .setDescription(`This ticket has been claimed by <@${user.id}>.`)
-            .setColor('Green');
-
-        const closeRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('❌ Close Ticket').setStyle(ButtonStyle.Danger)
-            );
+    if (interaction.customId === 'confirm_close') {
+        const ticketChannel = interaction.channel;
+        const ticketMember = await interaction.guild.members.fetch(ticketChannel.topic).catch(() => null);
         
-        await interaction.message.edit({ embeds: [newEmbed], components: [closeRow] });
-        await interaction.channel.send({ content: `<@${user.id}> will be handling your ticket today.` });
-        
-        logTicket(new EmbedBuilder().setTitle('Ticket Claimed').setDescription(`Ticket: ${interaction.channel.name}\nClaimed By: ${user.tag}`).setColor('Blue').setTimestamp());
+        await ticketChannel.delete();
+        await interaction.followUp({ content: 'Ticket closed.', ephemeral: true });
+
+        const embed = new EmbedBuilder()
+            .setTitle('Ticket Closed')
+            .setDescription(`Ticket \`${ticketChannel.name}\` was closed by ${interaction.user.tag}`)
+            .addFields(
+                { name: 'Opened By', value: ticketMember ? `<@${ticketMember.id}>` : 'Unknown User', inline: true },
+                { name: 'Transcript', value: 'Transcript not saved.', inline: true }
+            )
+            .setColor('Red')
+            .setTimestamp();
+        logTicket(embed);
+        return;
+    }
+
+    if (interaction.customId === 'cancel_close') {
+        await interaction.update({ content: 'Ticket closure cancelled.', components: [], ephemeral: true });
         return;
     }
     
-    // Close Ticket button
-    if (customId === 'close_ticket') {
+    if (interaction.customId === 'save_transcript') {
+        const ticketChannel = interaction.channel;
+        if (!ticketChannel.name.startsWith('ticket-')) {
+            return interaction.reply({ content: 'This is not a ticket channel.', ephemeral: true });
+        }
+    
         await interaction.deferReply({ ephemeral: true });
-        const closeRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder().setCustomId('reopen_ticket').setLabel('♻️ Reopen Ticket').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('save_transcript').setLabel('💾 Save Transcript').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId('delete_ticket').setLabel('🗑️ Delete Ticket').setStyle(ButtonStyle.Danger)
-            );
 
-        const closeEmbed = new EmbedBuilder()
-            .setTitle('Close Ticket')
-            .setDescription('Are you sure you want to close this ticket? This action is not permanent but will close the channel.')
-            .setColor('Red')
-            .setTimestamp();
-        await interaction.channel.send({ embeds: [closeEmbed], components: [closeRow] });
-        await interaction.editReply({ content: 'Ticket close panel sent.', ephemeral: true });
-        return;
-    }
-
-    // Reopen Ticket
-    if (customId === 'reopen_ticket') {
-        await interaction.deferReply({ ephemeral: true });
-        const userPerms = interaction.channel.permissionOverwrites.cache.find(p => p.type === 'member' && p.id !== interaction.guild.id);
-        if (userPerms) {
-            await interaction.channel.permissionOverwrites.edit(userPerms.id, { ViewChannel: true });
-            await interaction.channel.send({ content: 'Ticket reopened!' });
-            await interaction.message.delete();
-            logTicket(new EmbedBuilder().setTitle('Ticket Reopened').setDescription(`Ticket: ${interaction.channel.name}\nReopened By: ${user.tag}`).setColor('Green').setTimestamp());
-        } else {
-            await interaction.editReply({ content: 'Failed to find original ticket owner permissions.', ephemeral: true });
+        try {
+            const transcript = await getTranscript(ticketChannel);
+            const transcriptEmbed = new EmbedBuilder()
+                .setTitle(`Transcript for ${ticketChannel.name}`)
+                .setDescription('See the attached file for the full conversation history.')
+                .setColor('Blue')
+                .setTimestamp();
+    
+            await logTicket(transcriptEmbed);
+            await logTicket({ files: [{ attachment: transcript, name: `${ticketChannel.name}.html` }] });
+    
+            await interaction.editReply({ content: 'Transcript saved!', ephemeral: true });
+        } catch (err) {
+            console.error('Failed to save transcript:', err);
+            await interaction.editReply({ content: 'Failed to save transcript.', ephemeral: true });
         }
         return;
     }
 
-    // New: Save Transcript
-    if (customId === 'save_transcript') {
-        await interaction.deferReply({ ephemeral: true });
+    if (interaction.customId.startsWith('ticket_')) {
+        const ticketType = interaction.customId.replace('ticket_', '');
 
-        const transcript = await getTranscript(interaction.channel, client);
-        if (!transcript) {
-            return interaction.editReply({ content: 'Failed to create transcript.', ephemeral: true });
-        }
+        const modal = new ModalBuilder()
+            .setCustomId(`ticket_modal_${ticketType}`)
+            .setTitle(`Open a ${ticketType} Ticket`);
 
-        const logChannel = await interaction.guild.channels.fetch(TICKET_LOG);
-        if (logChannel) {
-            const fileName = `transcript-${interaction.channel.name}.txt`;
-            const buffer = Buffer.from(transcript, 'utf-8');
+        const subjectInput = new TextInputBuilder()
+            .setCustomId('ticket_subject')
+            .setLabel("Subject")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("e.g., Ban Appeal, Bug Report")
+            .setRequired(true);
 
-            await logChannel.send({
-                content: `📝 Transcript for ticket **${interaction.channel.name}**`,
-                files: [{
-                    attachment: buffer,
-                    name: fileName
-                }]
-            });
-            await interaction.editReply({ content: '✅ Transcript saved!', ephemeral: true });
-        } else {
-            await interaction.editReply({ content: 'Failed to find log channel.', ephemeral: true });
-        }
-        return;
-    }
+        const descriptionInput = new TextInputBuilder()
+            .setCustomId('ticket_description')
+            .setLabel("Description")
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder("Please describe your issue in detail.")
+            .setRequired(true);
 
-    // Delete Ticket
-    if (customId === 'delete_ticket') {
-        await interaction.deferReply({ ephemeral: true });
-        const closeEmbed = new EmbedBuilder()
-            .setColor('Red')
-            .setTitle('Ticket Closed')
-            .setDescription('This ticket will be deleted in 15 seconds.');
+        const firstRow = new ActionRowBuilder().addComponents(subjectInput);
+        const secondRow = new ActionRowBuilder().addComponents(descriptionInput);
 
-        const sentMessage = await interaction.channel.send({ embeds: [closeEmbed] });
-        
-        // Wait 15 seconds and then delete the channel
-        setTimeout(async () => {
-            await interaction.channel.delete().catch(err => {
-                console.error('Error deleting ticket channel:', err);
-                sentMessage.delete().catch(() => {});
-            });
-        }, 15000);
-        
-        await interaction.editReply({ content: 'Deleting ticket in 15 seconds...', ephemeral: true });
-        logTicket(new EmbedBuilder().setTitle('Ticket Deleted').setDescription(`Ticket: ${interaction.channel.name}\nDeleted By: ${user.tag}`).setColor('Red').setTimestamp());
+        modal.addComponents(firstRow, secondRow);
+        await interaction.showModal(modal);
         return;
     }
 }
 
-// ---------- handleTicketModal (creates ticket channel) ----------
+// --- handleTicketModal ---
 async function handleTicketModal(interaction) {
     await interaction.deferReply({ ephemeral: true });
+    
+    const subject = interaction.fields.getTextInputValue('ticket_subject');
+    const description = interaction.fields.getTextInputValue('ticket_description');
+    const ticketType = interaction.customId.replace('ticket_modal_', '');
+    const user = interaction.user;
+    
+    const guild = interaction.guild;
+    const category = guild.channels.cache.get(TICKET_CATEGORY);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+        await interaction.editReply({ content: 'Ticket category not configured or not found.', ephemeral: true });
+        return;
+    }
 
-    const ticketSubject = interaction.customId.replace('ticket_modal_ticket_', '');
-    const reason = interaction.fields.getTextInputValue('ticket_reason');
-    const robloxName = interaction.fields.getTextInputValue('ticket_roblox');
-
-    const hasTicket = interaction.guild.channels.cache.find(c =>
-        c.name.startsWith(`ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`) &&
-        c.parent && c.parent.id === TICKET_CATEGORY
+    // Check for existing open tickets
+    const existingTicket = guild.channels.cache.find(c => 
+        c.name.startsWith('ticket-') && c.topic && c.topic === user.id
     );
 
-    if (hasTicket) {
-        return interaction.editReply({ content: `You already have an open ticket: <#${hasTicket.id}>`, ephemeral: true });
+    if (existingTicket) {
+        await interaction.editReply({ content: `You already have an open ticket in ${existingTicket}. Please use that one or close it first.`, ephemeral: true });
+        return;
     }
 
     try {
-        const permissionOverwrites = [
-            // Deny @everyone from viewing all tickets
-            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            // Allow the ticket creator to view
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-        ];
-
-        const rolesToPing = [];
-
-        // Check the ticket type and set permissions accordingly
-        if (ticketSubject === 'report') {
-            // Report tickets are ONLY for the creator and the REPORT_ROLE
-            permissionOverwrites.push({ id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-            rolesToPing.push(REPORT_ROLE);
-        } else {
-            // All other tickets are for the creator, SUPPORT_ROLE, and REPORT_ROLE
-            permissionOverwrites.push(
-                { id: SUPPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-                { id: REPORT_ROLE, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-            );
-            rolesToPing.push(SUPPORT_ROLE, REPORT_ROLE);
-        }
+        const channelName = `ticket-${user.username.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 15)}-${Math.random().toString(36).substring(2, 6)}`;
         
-        const ticketChannel = await interaction.guild.channels.create({
-            name: `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+        const newTicketChannel = await guild.channels.create({
+            name: channelName,
             type: ChannelType.GuildText,
             parent: TICKET_CATEGORY,
-            permissionOverwrites: permissionOverwrites
+            topic: user.id, // Storing the user ID in the topic for easy access
+            permissionOverwrites: [
+                {
+                    id: guild.id,
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: user.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+                },
+                {
+                    id: client.user.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+                }
+            ],
         });
-        
-        const welcomeEmbed = new EmbedBuilder()
-            .setTitle(`New Ticket: ${ticketSubject.charAt(0).toUpperCase() + ticketSubject.slice(1)}`)
-            .setDescription(`A staff member will be with you shortly. Please provide any additional information to help us resolve your issue.`)
+
+        // Add support role if it exists
+        if (SUPPORT_ROLE) {
+            await newTicketChannel.permissionOverwrites.edit(SUPPORT_ROLE, { ViewChannel: true, SendMessages: true });
+        }
+
+        // Add report role if it's a report ticket
+        if (ticketType === 'report' && REPORT_ROLE) {
+            await newTicketChannel.permissionOverwrites.edit(REPORT_ROLE, { ViewChannel: true, SendMessages: true });
+        }
+
+        const closeButton = new ButtonBuilder()
+            .setCustomId('close_ticket')
+            .setLabel('Close Ticket')
+            .setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(closeButton);
+
+        const ticketEmbed = new EmbedBuilder()
+            .setTitle(`Ticket Opened - ${ticketType.charAt(0).toUpperCase() + ticketType.slice(1)}`)
+            .setDescription(`**Subject:** ${subject}\n\n**Description:**\n${description}\n\n<@${user.id}>, a support member will be with you shortly.`)
             .addFields(
-                { name: 'Opened by', value: `<@${interaction.user.id}>` },
-                { name: 'Reason', value: reason },
-                { name: 'Roblox Username', value: robloxName }
+                { name: 'Opened By', value: `<@${user.id}>`, inline: true },
+                { name: 'Ticket Type', value: ticketType, inline: true }
             )
             .setColor('Blue')
             .setTimestamp();
-
-        const claimRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder().setCustomId('claim_ticket').setLabel('🤝 Claim Ticket').setStyle(ButtonStyle.Primary)
-            );
-
-        const initialMessage = `<@${interaction.user.id}> ${rolesToPing.filter(Boolean).map(roleId => `<@&${roleId}>`).join(' ')}`;
-
-        await ticketChannel.send({ content: initialMessage, embeds: [welcomeEmbed], components: [claimRow] });
-        await interaction.editReply({ content: `✅ Your ticket has been created: <#${ticketChannel.id}>`, ephemeral: true });
         
-        logTicket(new EmbedBuilder().setTitle('Ticket Created').setDescription(`**Channel:** ${ticketChannel.name}\n**User:** ${interaction.user.tag}\n**Subject:** ${ticketSubject}\n**Reason:** ${reason}`).setColor('Blue').setTimestamp());
+        const supportPing = SUPPORT_ROLE ? `<@&${SUPPORT_ROLE}>` : '';
+        const reportPing = (ticketType === 'report' && REPORT_ROLE) ? `<@&${REPORT_ROLE}>` : '';
+        
+        await newTicketChannel.send({ 
+            content: `${supportPing} ${reportPing}`, 
+            embeds: [ticketEmbed], 
+            components: [row] 
+        });
 
+        await interaction.editReply({ content: `Your ticket has been created! You can find it here: ${newTicketChannel}.`, ephemeral: true });
+
+        const logEmbed = new EmbedBuilder()
+            .setTitle('Ticket Opened')
+            .setDescription(`A new ticket was opened by ${user.tag}`)
+            .addFields(
+                { name: 'Ticket Channel', value: `<#${newTicketChannel.id}>`, inline: true },
+                { name: 'Ticket Type', value: ticketType, inline: true }
+            )
+            .setColor('Green')
+            .setTimestamp();
+        logTicket(logEmbed);
     } catch (err) {
-        console.error('Error creating ticket channel:', err);
-        await interaction.editReply({ content: `Failed to create ticket: ${err.message}`, ephemeral: true });
+        console.error('Failed to create ticket channel:', err);
+        await interaction.editReply({ content: 'Failed to create ticket channel.', ephemeral: true });
     }
 }
 
