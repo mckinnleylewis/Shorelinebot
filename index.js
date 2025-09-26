@@ -875,4 +875,109 @@ async function handleTicketModal(interaction) {
     }
 }
 
+// -------------------- MONEY CODES SYSTEM --------------------
+const MONEY_CODES_FILE = './moneyCodes.json';
+let moneyCodes = {};
+if (fs.existsSync(MONEY_CODES_FILE)) {
+    try { moneyCodes = JSON.parse(fs.readFileSync(MONEY_CODES_FILE)); } catch(e) { moneyCodes = {}; }
+}
+const saveMoneyCodes = () => fs.writeFileSync(MONEY_CODES_FILE, JSON.stringify(moneyCodes, null, 2));
+
+// Register money code commands
+commands.push(
+    new SlashCommandBuilder().setName('moneycodes').setDescription('View all money codes').toJSON(),
+    new SlashCommandBuilder()
+        .setName('setmoney')
+        .setDescription('Add a money code (admin only)')
+        .addStringOption(o => o.setName('code').setDescription('The money code').setRequired(true))
+        .addNumberOption(o => o.setName('prize').setDescription('Prize amount').setRequired(true))
+        .addStringOption(o => o.setName('status').setDescription('Active or Expired').setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName('editmoney')
+        .setDescription('Edit or delete a money code (admin only)')
+        .addStringOption(o => o.setName('code').setDescription('The code to edit').setRequired(true))
+        .addNumberOption(o => o.setName('prize').setDescription('New prize amount').setRequired(false))
+        .addStringOption(o => o.setName('status').setDescription('Active or Expired').setRequired(false))
+        .addStringOption(o => o.setName('action').setDescription('Type "delete" to remove the code').setRequired(false))
+        .toJSON()
+);
+
+// Handle money code commands in handleCommand
+const moneyCommands = ['moneycodes', 'setmoney', 'editmoney'];
+if (moneyCommands.includes(interaction.commandName)) {
+    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator) || customPermUsers.includes(userId) || interaction.guild.ownerId === userId;
+
+    switch (interaction.commandName) {
+        case 'moneycodes':
+            {
+                if (Object.keys(moneyCodes).length === 0) {
+                    return interaction.reply({ content: 'No money codes have been set yet.', ephemeral: true });
+                }
+                const embed = new EmbedBuilder()
+                    .setTitle('💰 Money Codes')
+                    .setColor('Gold')
+                    .setTimestamp();
+
+                for (const [code, data] of Object.entries(moneyCodes)) {
+                    embed.addFields({ name: code, value: `$${data.prize.toLocaleString()} — ${data.status}`, inline: false });
+                }
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
+        case 'setmoney':
+            {
+                if (!isAdmin) return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+
+                const code = interaction.options.getString('code');
+                const prize = interaction.options.getNumber('prize');
+                const status = interaction.options.getString('status').toLowerCase() === 'active' ? 'Active' : 'Expired';
+
+                moneyCodes[code] = { prize, status };
+                saveMoneyCodes();
+
+                const embed = new EmbedBuilder()
+                    .setTitle('💾 Money Code Added')
+                    .setDescription(`Code: **${code}**\nPrize: $${prize.toLocaleString()}\nStatus: ${status}`)
+                    .setColor('Green')
+                    .setTimestamp();
+
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
+        case 'editmoney':
+            {
+                if (!isAdmin) return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+
+                const code = interaction.options.getString('code');
+                const prize = interaction.options.getNumber('prize');
+                const status = interaction.options.getString('status')?.toLowerCase();
+                const action = interaction.options.getString('action')?.toLowerCase();
+
+                if (!moneyCodes[code]) return interaction.reply({ content: `Code **${code}** does not exist.`, ephemeral: true });
+
+                if (action === 'delete') {
+                    delete moneyCodes[code];
+                    saveMoneyCodes();
+                    return interaction.reply({ content: `✅ Money code **${code}** has been deleted.`, ephemeral: true });
+                }
+
+                if (prize) moneyCodes[code].prize = prize;
+                if (status) moneyCodes[code].status = status === 'active' ? 'Active' : 'Expired';
+                saveMoneyCodes();
+
+                const embed = new EmbedBuilder()
+                    .setTitle('💾 Money Code Updated')
+                    .setDescription(`Code: **${code}**\nPrize: $${moneyCodes[code].prize.toLocaleString()}\nStatus: ${moneyCodes[code].status}`)
+                    .setColor('Blue')
+                    .setTimestamp();
+
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
+    }
+    return;
+}
+
+
 client.login(TOKEN);
