@@ -26,6 +26,22 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
+
+// Money codes persistence
+const CODES_FILE = './moneyCodes.json';
+let moneyCodes = []; // Array of { name: string, prize: string, status: string }
+
+if (fs.existsSync(CODES_FILE)) {
+    try {
+        moneyCodes = JSON.parse(fs.readFileSync(CODES_FILE));
+    } catch (e) {
+        moneyCodes = [];
+    }
+}
+
+const saveCodes = () =>
+    fs.writeFileSync(CODES_FILE, JSON.stringify(moneyCodes, null, 2));
+
 const { TOKEN, GUILD_ID, LOG_CHANNEL_ID, SUPPORT_ROLE, REPORT_ROLE, TICKET_CATEGORY, TICKET_LOG, WELCOME_CHANNEL } = process.env;
 
 // --- AFK Map ---
@@ -134,6 +150,25 @@ const commands = [
     new SlashCommandBuilder().setName('removemulti').setDescription('Remove multiple roles from a user (comma-separated role mentions/ids/names)')
     .addUserOption(o => o.setName('user').setDescription('Target user').setRequired(true))
     .addStringOption(o => o.setName('roles').setDescription('Comma-separated roles').setRequired(true)),
+
+new SlashCommandBuilder()
+        .setName('listcodes')
+        .setDescription('Displays all money codes and their status.'),
+    new SlashCommandBuilder()
+        .setName('createcode')
+        .setDescription('ADMIN: Create a new money code.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(o => o.setName('codename').setDescription('The unique name of the code').setRequired(true))
+        .addStringOption(o => o.setName('prize').setDescription('The prize/reward for the code').setRequired(true))
+        .addStringOption(o => o.setName('status').setDescription('The current status (e.g., Active, Expired, Pending)').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('editcode')
+        .setDescription('ADMIN: Edit or delete an existing money code.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(o => o.setName('codename').setDescription('The unique name of the code to edit/delete').setRequired(true))
+        .addStringOption(o => o.setName('prize').setDescription('The new prize/reward (optional)'))
+        .addStringOption(o => o.setName('status').setDescription('The new status (optional)'))
+        .addBooleanOption(o => o.setName('delete').setDescription('Set to true to delete the code').setRequired(false)),
 
     // NEW: Stick a message to the bottom of the channel
     new SlashCommandBuilder().setName('stickymessage').setDescription('Sticks a message to the bottom of the channel')
@@ -482,6 +517,118 @@ async function handleCommand(interaction) {
                     await interaction.reply({ content: 'Ticket panel sent!', ephemeral: true });
                     break;
                 }
+
+
+                case 'listcodes': {
+    const embed = new EmbedBuilder()
+        .setTitle('💰 Money Codes List')
+        .setColor('Gold')
+        .setFooter({ text: 'Use these codes for in-game rewards!' })
+        .setTimestamp();
+
+    if (moneyCodes.length === 0) {
+        embed.setDescription('There are currently no active money codes.');
+    } else {
+        const list = moneyCodes
+            .map(c => `\`${c.name}\` = **${c.prize}** - *${c.status}*`)
+            .join('\n');
+        embed.setDescription(list);
+    }
+
+    await interaction.reply({ embeds: [embed] });
+    break;
+}
+
+case 'createcode': {
+    if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({
+            content: 'You need Administrator permission to use this command.',
+            ephemeral: true,
+        });
+    }
+
+    const name = interaction.options.getString('codename').toUpperCase();
+    const prize = interaction.options.getString('prize');
+    const status = interaction.options.getString('status');
+
+    if (moneyCodes.some(c => c.name === name)) {
+        return interaction.reply({
+            content: `A code named \`${name}\` already exists. Use \`/editcode\` to modify it.`,
+            ephemeral: true,
+        });
+    }
+
+    const newCode = { name, prize, status };
+    moneyCodes.push(newCode);
+    saveCodes();
+
+    const embed = new EmbedBuilder()
+        .setTitle('✅ New Code Created')
+        .addFields(
+            { name: 'Codename', value: `\`${name}\``, inline: true },
+            { name: 'Prize', value: prize, inline: true },
+            { name: 'Status', value: status, inline: true },
+        )
+        .setColor('Green')
+        .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+    logCommand(embed);
+    break;
+}
+
+case 'editcode': {
+    if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({
+            content: 'You need Administrator permission to use this command.',
+            ephemeral: true,
+        });
+    }
+
+    const name = interaction.options.getString('codename').toUpperCase();
+    const prize = interaction.options.getString('prize');
+    const status = interaction.options.getString('status');
+    const shouldDelete = interaction.options.getBoolean('delete') || false;
+
+    const codeIndex = moneyCodes.findIndex(c => c.name === name);
+
+    if (codeIndex === -1) {
+        return interaction.reply({
+            content: `Code \`${name}\` not found in the list.`,
+            ephemeral: true,
+        });
+    }
+
+    const oldCode = moneyCodes[codeIndex];
+    let embed;
+
+    if (shouldDelete) {
+        moneyCodes.splice(codeIndex, 1);
+        embed = new EmbedBuilder()
+            .setTitle('🗑️ Code Deleted')
+            .setDescription(`The code \`${name}\` has been removed from the list.`)
+            .setColor('Red');
+    } else {
+        if (prize) oldCode.prize = prize;
+        if (status) oldCode.status = status;
+
+        embed = new EmbedBuilder()
+            .setTitle('📝 Code Updated')
+            .addFields(
+                { name: 'Codename', value: `\`${oldCode.name}\``, inline: true },
+                { name: 'New Prize', value: oldCode.prize, inline: true },
+                { name: 'New Status', value: oldCode.status, inline: true },
+            )
+            .setColor('Orange');
+    }
+
+    saveCodes();
+    embed.setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+    logCommand(embed);
+    break;
+}
 
             // --- Ticket channel user/role add/remove ---
             case 'add':
