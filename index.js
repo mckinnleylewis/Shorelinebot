@@ -109,8 +109,9 @@ const commands = [
     .addUserOption(o => o.setName('target').setDescription('User to remove warning from').setRequired(true))
     .addStringOption(o => o.setName('warnid').setDescription('Warning ID to remove').setRequired(true)),
 
-    new SlashCommandBuilder().setName('say').setDescription('Make the bot say something')
-    .addStringOption(o => o.setName('message').setDescription('Message to say').setRequired(true)),
+new SlashCommandBuilder().setName('say').setDescription('Make the bot say something')
+.addStringOption(o => o.setName('message').setDescription('Message to say').setRequired(true))
+.setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder().setName('announce').setDescription('Send an announcement embed')
     .addStringOption(o => o.setName('message').setDescription('Announcement message').setRequired(true)),
@@ -312,7 +313,7 @@ async function handleCommand(interaction) {
     const message = interaction.options.getString('message');
 
     // Which commands require admin?
-    const adminCommands = ['kick', 'ban', 'warn', 'removewarn', 'addrole', 'removerole', 'addmulti', 'removemulti', 'add', 'remove', 'permissions', 'removeperms', 'ticketpanel'];
+    const adminCommands = ['kick', 'ban', 'warn', 'removewarn', 'addrole', 'removerole', 'addmulti', 'removemulti', 'add', 'remove', 'permissions', 'removeperms', 'ticketpanel', 'say'];
     if (adminCommands.includes(interaction.commandName)) {
         const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
         const isOwner = interaction.guild.ownerId === userId;
